@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
 using Godot;
-using Mi2Kit;
+using Astrolabe.UI;
 
 namespace MelvorModLoader;
 

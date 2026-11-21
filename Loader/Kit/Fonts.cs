@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Godot;
 using MelvorModLoader;
 
-namespace Mi2Kit;
+namespace Astrolabe.UI;
 
 /// <summary>Finds the game's UI fonts inside its pack (their folder can move between game versions).</summary>
 static class Fonts

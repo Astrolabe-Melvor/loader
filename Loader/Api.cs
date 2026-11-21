@@ -74,8 +74,20 @@ public static class GameAccess
     /// <summary>True while the game simulates offline time on its own thread. Leave the game alone until it is false.</summary>
     public static bool IsComputingOffline => ((SceneTree)Engine.GetMainLoop()).Paused;
 
-    /// <summary>The in-game screen, or null on the main menu.</summary>
-    public static GameView? FindGameView() => FindNode<GameView>();
+    static GameView? s_view;
+    static ulong s_lastSearch;
+
+    /// <summary>The in-game screen, or null on the main menu. Cached, so it is cheap to call every frame.</summary>
+    public static GameView? FindGameView()
+    {
+        if (s_view != null && GodotObject.IsInstanceValid(s_view) && s_view.IsInsideTree()) return s_view;
+        s_view = null;
+        // Searching the whole scene tree is slow; on the main menu look again at most twice a second.
+        ulong now = Time.GetTicksMsec();
+        if (now - s_lastSearch < 500) return null;
+        s_lastSearch = now;
+        return s_view = FindNode<GameView>();
+    }
 
     /// <summary>The open character's game state, or null on the main menu.</summary>
     public static GamesByMalcs.Melvor2.Game? CurrentGame

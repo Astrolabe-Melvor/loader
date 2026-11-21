@@ -24,7 +24,7 @@ No game files are changed or shipped.
 
 ```csharp
 using MelvorModLoader;
-using Mi2Kit;
+using Astrolabe.UI;
 
 public sealed class Hello : IMod
 {
@@ -50,8 +50,8 @@ Put the project in `Mods\Hello\Hello.csproj` and `Install.cmd` builds it into th
 |---|---|
 | `ModContext` | `Name`, `Directory`, `Tree`, `Log()`, `Frame` event, `AddWindow(title, toggle, key)` |
 | `GameAccess` | `CurrentGame`, `FindGameView()`, `FindNode<T>()`, `IsComputingOffline` |
-| `Mi2Kit.Kit` | `Theme`, `Box()`, `Label()`, `Heading()`, `Btn()`, `Row()`, palette colours, game fonts |
-| `Mi2Kit.KitWindow` | game-framed window with title ribbon, drag, `Body`, `HeaderExtras`, `Open/Close/Toggle` |
+| `Astrolabe.UI.Kit` | `Theme`, `Box()`, `Label()`, `Heading()`, `Btn()`, `Row()`, palette colours, game fonts |
+| `Astrolabe.UI.KitWindow` | game-framed window with title ribbon, drag, `Body`, `HeaderExtras`, `Open/Close/Toggle` |
 
 Theme variations: `Heading`, `Dim`, `ActionButton`, `Card`, `Ribbon`.
 

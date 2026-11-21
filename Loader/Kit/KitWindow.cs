@@ -1,7 +1,7 @@
 using System;
 using Godot;
 
-namespace Mi2Kit;
+namespace Astrolabe.UI;
 
 /// <summary>
 /// A game-styled window: crafting-panel frame, teal title ribbon, drag by the title bar, close button.
@@ -149,18 +149,25 @@ public sealed class KitWindow
         for (int i = 0; i < s_stack.Count; i++) s_stack[i]._layer.Layer = Mathf.Min(64 + i, 127);
     }
 
+    Vector2 _grab;   // where in the window the mouse grabbed it
+
     void OnBarInput(InputEvent e)
     {
         if (e is InputEventMouseButton { ButtonIndex: MouseButton.Left } mb)
         {
             _dragging = mb.Pressed;
-            if (mb.Pressed) BringToFront();
+            if (mb.Pressed)
+            {
+                BringToFront();
+                _grab = Root.GetGlobalMousePosition() - Root.Position;
+            }
         }
-        else if (e is InputEventMouseMotion mm && _dragging)
+        else if (e is InputEventMouseMotion && _dragging)
         {
+            // Follow the mouse from the grab point (not by adding deltas, which drift once the window hits an edge).
             Vector2 screen = Root.GetViewportRect().Size;
-            Vector2 p = Root.Position + mm.Relative;
-            Root.Position = new Vector2(Mathf.Clamp(p.X, -Root.Size.X + 80, screen.X - 80), Mathf.Clamp(p.Y, 0, screen.Y - 40));
+            Vector2 p = Root.GetGlobalMousePosition() - _grab;
+            Root.Position = new Vector2(Mathf.Clamp(p.X, -Root.Size.X + 80, screen.X - 80), Mathf.Clamp(p.Y, 0, screen.Y - 40)).Round();
         }
     }
 }

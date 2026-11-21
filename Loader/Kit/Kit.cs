@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Godot;
 using MelvorModLoader;
 
-namespace Mi2Kit;
+namespace Astrolabe.UI;
 
 /// <summary>
 /// The shared look: the game's own UI textures and fonts, so mod windows read as part of the game.
@@ -127,7 +127,7 @@ public static class Kit
     }
 
     /// <summary>
-    /// The window theme. Type variations: "Heading", "Dim", "ActionButton", "Card", "Ribbon".
+    /// The window theme. Type variations: "Heading", "Dim", "ActionButton", "Tab", "Card", "Ribbon".
     /// Set a control's ThemeTypeVariation to use one.
     /// </summary>
     public static Theme Theme => s_theme ??= Build();
@@ -185,6 +185,51 @@ public static class Kit
         t.SetConstant("separation", "VBoxContainer", 6);
         t.SetConstant("separation", "HBoxContainer", 8);
 
+        // Tables (Tree): dark sheet, teal selection, parchment column titles, like the wiki's tables.
+        t.SetStylebox("panel", "Tree", Flat(Color.FromHtml("#161616"), Colors.Black, 2, 3, 4, 4));
+        t.SetStylebox("focus", "Tree", new StyleBoxEmpty());
+        t.SetStylebox("selected", "Tree", Flat(new Color(0.18f, 0.5f, 0.53f, 0.55f), new Color(0, 0, 0, 0), 0, 2, 0, 0));
+        t.SetStylebox("selected_focus", "Tree", Flat(new Color(0.18f, 0.5f, 0.53f, 0.7f), new Color(0, 0, 0, 0), 0, 2, 0, 0));
+        t.SetStylebox("hovered", "Tree", Flat(new Color(1, 1, 1, 0.05f), new Color(0, 0, 0, 0), 0, 2, 0, 0));
+        t.SetStylebox("title_button_normal", "Tree", Flat(Color.FromHtml("#1f1f1f"), Color.FromHtml("#0a0a0a"), 1, 0, 6, 3));
+        t.SetStylebox("title_button_hover", "Tree", Flat(Color.FromHtml("#262626"), Color.FromHtml("#0a0a0a"), 1, 0, 6, 3));
+        t.SetStylebox("title_button_pressed", "Tree", Flat(Color.FromHtml("#262626"), Color.FromHtml("#0a0a0a"), 1, 0, 6, 3));
+        t.SetColor("title_button_color", "Tree", Parchment);
+        t.SetColor("font_color", "Tree", Text);
+        t.SetColor("font_selected_color", "Tree", Colors.White);
+        t.SetColor("guide_color", "Tree", new Color(1, 1, 1, 0.04f));
+        t.SetConstant("v_separation", "Tree", 6);
+        t.SetConstant("h_separation", "Tree", 10);
+        t.SetConstant("draw_guides", "Tree", 1);
+        t.SetFont("title_button_font", "Tree", HeadFont);
+
+        // Tab-like toggle buttons ("Tab" variation): flat until pressed.
+        t.SetTypeVariation("Tab", "Button");
+        ButtonStyle(t, "Tab", Button);
+        t.SetStylebox("pressed", "Tab", Box(ActionButton, 12, 4));
+        t.SetStylebox("hover_pressed", "Tab", Box(ActionButton, 12, 4));
+        t.SetColor("font_pressed_color", "Tab", Colors.White);
+        t.SetColor("font_hover_pressed_color", "Tab", Colors.White);
+
+        t.SetStylebox("normal", "SpinBox", Flat(Field, Color.FromHtml("#3c3c3c")));
+
+        // Tooltips: the game's own theme leaves them without a background.
+        t.SetStylebox("panel", "TooltipPanel", Flat(Color.FromHtml("#101010"), Color.FromHtml("#3a3a3a"), 1, 3, 8, 5));
+        t.SetColor("font_color", "TooltipLabel", Text);
+        t.SetFontSize("font_size", "TooltipLabel", 13);
+
+        // Popups opened from a picker.
+        t.SetStylebox("panel", "PopupPanel", Box(Tooltip, 6, 6));
+        t.SetStylebox("panel", "ItemList", Flat(Color.FromHtml("#161616"), Colors.Black, 1, 3, 4, 4));
+        t.SetStylebox("focus", "ItemList", new StyleBoxEmpty());
+        t.SetStylebox("selected", "ItemList", Flat(new Color(0.18f, 0.5f, 0.53f, 0.55f), new Color(0, 0, 0, 0), 0, 2, 0, 0));
+        t.SetStylebox("selected_focus", "ItemList", Flat(new Color(0.18f, 0.5f, 0.53f, 0.7f), new Color(0, 0, 0, 0), 0, 2, 0, 0));
+        t.SetStylebox("hovered", "ItemList", Flat(new Color(1, 1, 1, 0.06f), new Color(0, 0, 0, 0), 0, 2, 0, 0));
+        t.SetColor("font_color", "ItemList", Text);
+        t.SetColor("font_selected_color", "ItemList", Colors.White);
+        t.SetConstant("v_separation", "ItemList", 4);
+        t.SetConstant("icon_margin", "ItemList", 6);
+
         t.SetColor("font_color", "CheckBox", Text);
         t.SetColor("font_color", "CheckButton", Text);
         return t;
@@ -203,6 +248,32 @@ public static class Kit
         t.SetColor("font_pressed_color", type, Gold);
         t.SetColor("font_hover_pressed_color", type, Gold);
         t.SetColor("font_disabled_color", type, new Color(Dim, 0.6f));
+    }
+
+    // ---- icons ----
+
+    static readonly Dictionary<ulong, Texture2D> s_icons = new();
+
+    /// <summary>A copy of a game icon shrunk to <paramref name="size"/> pixels, for lists and tables. Cached.</summary>
+    public static Texture2D? Icon(Texture2D? source, int size = 20)
+    {
+        if (source == null) return null;
+        ulong key = source.GetInstanceId() * 31 + (ulong)size;
+        if (s_icons.TryGetValue(key, out Texture2D? done)) return done;
+        Texture2D result = source;
+        try
+        {
+            Image? img = source.GetImage();
+            if (img != null)
+            {
+                if (img.IsCompressed()) img.Decompress();
+                float scale = size / (float)Mathf.Max(img.GetWidth(), img.GetHeight());
+                img.Resize(Mathf.Max(1, (int)(img.GetWidth() * scale)), Mathf.Max(1, (int)(img.GetHeight() * scale)), Image.Interpolation.Lanczos);
+                result = ImageTexture.CreateFromImage(img);
+            }
+        }
+        catch { }
+        return s_icons[key] = result;
     }
 
     // ---- small builders ----

@@ -1,6 +1,6 @@
 using Godot;
 
-namespace Mi2Kit;
+namespace Astrolabe.UI;
 
 /// <summary>Every kit control in one window, for checking the look in game (Mods menu > Theme preview).</summary>
 static class ThemePreview
