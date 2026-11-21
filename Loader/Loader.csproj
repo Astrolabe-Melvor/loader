@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- The assembly name and AssemblyVersion stay fixed: mods built for other Melvor Idle 2 loaders bind to them. -->
+    <AssemblyName>MelvorModLoader</AssemblyName>
+    <RootNamespace>MelvorModLoader</RootNamespace>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <Version>0.1.0</Version>
+    <Product>Astrolabe Loader</Product>
+    <Description>Astrolabe Loader: mod loader for Melvor Idle 2.</Description>
+    <Copyright>Copyright (c) 2026 Elocrypt</Copyright>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- Godot starts .NET from the data folder named after the assembly, so that folder needs its own runtime.
+         Same runtime version as the game. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <RuntimeFrameworkVersion>10.0.15</RuntimeFrameworkVersion>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Compile against the game's copies; at runtime they are loaded from the game's data folder. -->
+    <Reference Include="GodotSharp"><HintPath>$(GameData)\GodotSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="GamesByMalcs.Melvor2"><HintPath>$(GameData)\GamesByMalcs.Melvor2.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.Reflection.Metadata.MetadataUpdater.IsSupported" Value="false" />
+  </ItemGroup>
+</Project>

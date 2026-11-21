@@ -1,0 +1,15 @@
+<Project>
+  <!-- Where Melvor Idle 2 is installed. Override with the MI2_GAME_DIR environment variable. -->
+  <PropertyGroup>
+    <GameDir Condition="'$(GameDir)' == '' And '$(MI2_GAME_DIR)' != ''">$(MI2_GAME_DIR)</GameDir>
+    <GameDir Condition="'$(GameDir)' == ''">F:\SteamLibrary\steamapps\common\Melvor Idle 2</GameDir>
+    <GameData>$(GameDir)\data_GamesByMalcs.Melvor2_windows_x86_64</GameData>
+    <LoaderOut>$(GameDir)\data_MelvorModLoader_windows_x86_64</LoaderOut>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <DebugType>none</DebugType>
+    <Authors>Elocrypt</Authors>
+  </PropertyGroup>
+</Project>

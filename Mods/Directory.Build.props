@@ -1,0 +1,15 @@
+<Project>
+  <Import Project="..\Directory.Build.props" />
+  <!-- Every mod: built straight into the game's mods folder, against the installed loader and the game's DLLs. -->
+  <PropertyGroup>
+    <OutputPath>$(GameDir)\mods\$(MSBuildProjectName)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="MelvorModLoader"><HintPath>$(LoaderOut)\MelvorModLoader.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="GodotSharp"><HintPath>$(GameData)\GodotSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="GamesByMalcs.Melvor2"><HintPath>$(GameData)\GamesByMalcs.Melvor2.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>
