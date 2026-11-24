@@ -14,6 +14,10 @@ Start the game. A green tag in the top-left confirms the loader, and **F1** open
 
 `Uninstall.cmd` removes `override.cfg` and the loader folder. The game then runs untouched.
 
+## Releases
+
+`Package.cmd` builds ready-to-share zips into `dist\`: `AstrolabeLoader-<version>.zip` and one `Astrolabe<Mod>-<version>.zip` per mod. Each extracts straight into the game folder. `Package.cmd release` also uploads them to a GitHub Release of this repo (needs the [gh CLI](https://cli.github.com), logged in). The build needs the game installed, because mods compile against its DLLs.
+
 ## How it works
 
 Godot reads `override.cfg` before the project settings. Ours sets `dotnet/project/assembly_name` to `MelvorModLoader`, so the engine starts .NET from `data_MelvorModLoader_windows_x86_64` and calls our entry point instead of the game's. The loader boots the game exactly as Godot's own entry point would, then loads every DLL in `mods\` and `mods\<Mod>\` that has a public `IMod` class.

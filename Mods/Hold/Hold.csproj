@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Hold</AssemblyName>
+    <RootNamespace>Astrolabe.Hold</RootNamespace>
+    <Version>0.3.0</Version>
+    <Product>Astrolabe Hold</Product>
+  </PropertyGroup>
+</Project>

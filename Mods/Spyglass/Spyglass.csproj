@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Spyglass</AssemblyName>
+    <RootNamespace>Astrolabe.Spyglass</RootNamespace>
+    <Version>0.1.1</Version>
+    <Product>Astrolabe Spyglass</Product>
+  </PropertyGroup>
+</Project>

@@ -303,6 +303,15 @@ public static class Kit
         return h;
     }
 
+    /// <summary>A number box that takes what you type straight away, and again when you leave it, instead of waiting for Enter.</summary>
+    public static SpinBox Spin(SpinBox box)
+    {
+        box.Set("update_on_text_changed", true);
+        box.GetLineEdit().FocusExited += () => box.Call("apply");
+        box.GetLineEdit().SelectAllOnFocus = true;
+        return box;
+    }
+
     public static Control Spacer()
     {
         return new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, MouseFilter = Control.MouseFilterEnum.Ignore };

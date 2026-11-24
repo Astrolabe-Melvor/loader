@@ -42,6 +42,17 @@ static class ModsMenu
             Kit.Btn("Open mods folder", () => OS.ShellOpen(Startup.ModsFolder)),
             Kit.Btn("Reset all keys", Hotkeys.ResetAll)));
 
+        // Mod window size, on top of the game's own UI Scale setting (which mod windows follow too).
+        var scale = new OptionButton { CustomMinimumSize = new Vector2(120, 0) };
+        float[] steps = { 0.7f, 0.8f, 0.9f, 1f, 1.1f, 1.2f, 1.3f, 1.4f, 1.5f };
+        foreach (float f in steps) scale.AddItem($"{f * 100:0}%");
+        scale.Select(Array.IndexOf(steps, steps.OrderBy(f => Math.Abs(f - WindowPrefs.Scale)).First()));
+        scale.ItemSelected += i => WindowPrefs.SetScale(steps[i]);
+        var reset = Kit.Btn("Fit all windows again", WindowPrefs.ResetSizes);
+        reset.TooltipText = "Forget the sizes you dragged windows to; each fits its content again.";
+        s_win.Body.AddChild(Kit.Row(Kit.Label("Mod window size:", null, 0, "Dim"), scale,
+            Kit.Label("on top of the game's UI Scale. Drag a window's corner to resize it.", null, 13, "Dim"), Kit.Spacer(), reset));
+
         s_win.Opened += Rebuild;
         s_win.Closed += StopListening;
         Hotkeys.ListChanged += () => { if (s_win.Visible) Rebuild(); };

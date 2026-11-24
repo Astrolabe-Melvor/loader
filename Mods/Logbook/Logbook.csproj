@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Logbook</AssemblyName>
+    <RootNamespace>Astrolabe.Logbook</RootNamespace>
+    <Version>0.1.0</Version>
+    <Product>Astrolabe Logbook</Product>
+  </PropertyGroup>
+</Project>

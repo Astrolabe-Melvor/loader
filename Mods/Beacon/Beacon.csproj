@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Beacon</AssemblyName>
+    <RootNamespace>Astrolabe.Beacon</RootNamespace>
+    <Version>0.2.0</Version>
+    <Product>Astrolabe Beacon</Product>
+  </PropertyGroup>
+</Project>

@@ -12,7 +12,7 @@ using GamesByMalcs.Melvor2.Data.Items;
 using GamesByMalcs.Melvor2.Entities;
 using GamesByMalcs.Melvor2.EventBus;
 
-namespace Astrolabe.ActionQueue;
+namespace Astrolabe.Course;
 
 public enum Goal
 {
@@ -22,6 +22,7 @@ public enum Goal
     Level,        // until a skill reaches a level
     Minutes,      // for N minutes
     Times,        // until the action has been done N times
+    Gold,         // until you have N GP (Most GP steps)
 }
 
 public sealed class Step
@@ -33,8 +34,14 @@ public sealed class Step
     public string SkillName { get; set; } = "";
     public string Item { get; set; } = "";
     public string ItemName { get; set; } = "";
-    /// <summary>Side by side: steps in different lanes run at the same time; each lane runs its steps in order.</summary>
-    public int Lane { get; set; } = 1;
+    /// <summary>Loadout to wear: "" = the skill's gear set from Options, "*keep" = leave it, else a game loadout id.</summary>
+    public string Gear { get; set; } = "";
+    /// <summary>Combat only. Weapon: "" = the loadout's own, "*best" = best you own against the monster, else an item id.</summary>
+    public string Weapon { get; set; } = "";
+    /// <summary>Combat only. Stance: "" = leave as is, "*best" = best for the weapon, else a stance id (Slash, Crush...).</summary>
+    public string Stance { get; set; } = "";
+    /// <summary>Skills: a toolbelt set (its id) to put on when the step starts; "" = leave the toolbelt as it is.</summary>
+    public string Belt { get; set; } = "";
 
     // Progress, saved so a game restart picks up where it was.
     public bool Begun { get; set; }
@@ -46,6 +53,9 @@ public sealed class Step
     [JsonIgnore] public string State { get; set; } = "";
     [JsonIgnore] public bool Waiting { get; set; }
     [JsonIgnore] public double RetryAt { get; set; }
+    [JsonIgnore] public double BeltCheckAt { get; set; }
+    [JsonIgnore] public double RefillWindowStart { get; set; }
+    [JsonIgnore] public int Refills { get; set; }
     [JsonIgnore] public double LastRestart { get; set; }
     [JsonIgnore] public int Restarts { get; set; }
     [JsonIgnore] public int Tries { get; set; }
@@ -55,7 +65,12 @@ public sealed class Step
     [JsonIgnore] public Dictionary<string, double> FailedUntil { get; } = new();
 
     [JsonIgnore] public bool IsSell => Action.Entity == Starter.SellEntity;
-    [JsonIgnore] public bool IsBest => Action.Target == Starter.BestTarget;
+    /// <summary>Buy from the shop (Action.Target is the purchase id) until the bank holds Amount of Item.</summary>
+    [JsonIgnore] public bool IsShop => Action.Entity == ShopSource.Entity;
+    [JsonIgnore] public bool IsBest => Action.Target == Starter.BestTarget || Action.Target == Starter.GoldTarget;
+    [JsonIgnore] public bool IsGold => Action.Target == Starter.GoldTarget;
+    /// <summary>Most GP steps: sell what the action makes as it comes in (never locked bank stacks).</summary>
+    public bool SellOutput { get; set; } = true;
     /// <summary>The action to run: the step's own, or for "train a skill" the one picked for now.</summary>
     [JsonIgnore] public ActionRef Effective => IsBest ? Resolved ?? Action : Action;
 
@@ -68,12 +83,13 @@ public sealed class Step
         Goal.MoreItems => $"until {Amount:N0} more {ItemName}",
         Goal.Minutes => $"for {Amount} minute{(Amount == 1 ? "" : "s")}",
         Goal.Times => $"{Amount:N0} time{(Amount == 1 ? "" : "s")}",
+        Goal.Gold => $"until you have {Amount:N0} GP",
         _ => "",
     };
 
     public Step Copy() => new()
     {
-        Action = Action, Goal = Goal, Amount = Amount, Skill = Skill, SkillName = SkillName, Item = Item, ItemName = ItemName, Lane = Lane,
+        Action = Action, Goal = Goal, Amount = Amount, Skill = Skill, SkillName = SkillName, Item = Item, ItemName = ItemName, Gear = Gear, Weapon = Weapon, Stance = Stance, Belt = Belt, SellOutput = SellOutput,
     };
 
     public void Reset()
@@ -93,20 +109,33 @@ public sealed class QueueState
     public List<Step> Steps { get; set; } = new();
     public bool Running { get; set; }
     public bool Loop { get; set; }
-    /// <summary>How many lanes run at once (1 = one step at a time).</summary>
-    public int Lanes { get; set; } = 1;
-    /// <summary>Done while every lane waits for materials and after the queue ends. Null: leave the game as it is.</summary>
+    /// <summary>Done while a step waits for materials and after the queue ends. Null: leave the game as it is.</summary>
     public ActionRef? Idle { get; set; }
 
     public bool Alerts { get; set; } = true;      // sound and taskbar flash when it finishes or gets stuck
     public bool FoodGuard { get; set; } = true;   // stop a combat step when the selected food runs out
     public bool BankGuard { get; set; } = true;   // pause when the bank is full
     public bool Hud { get; set; } = true;         // show the current step in a corner of the screen
+    public float HudX { get; set; } = -1;          // panel position, -1 = default spot (top-left, beside the logo)
+    public float HudY { get; set; } = -1;
+    public bool HudMin { get; set; }              // folded to one line
+    public bool AutoGear { get; set; } = true;    // swap loadouts when a combat step starts
+    /// <summary>Entity id to game loadout id; only the combat entity is used (steps left on "combat default").</summary>
+    public Dictionary<string, string> SkillGear { get; set; } = new();
+    /// <summary>Loadout id to the weapon it held before a step swapped it ("" = none), so it can be put back.</summary>
+    public Dictionary<string, string> WeaponRestore { get; set; } = new();
+    /// <summary>Same for the offhand (a two-handed weapon pushes it into the bank).</summary>
+    public Dictionary<string, string> OffhandRestore { get; set; } = new();
+    /// <summary>"loadout|slot" to the item that slot held before a step changed it (the slayer gauntlet's gloves).</summary>
+    public Dictionary<string, string> SlotRestore { get; set; } = new();
+    public bool SlayerGauntlet { get; set; } = true;   // wear a slayer gauntlet when the monster is a slayer task
+    /// <summary>Toolbelt sets per skill, made in the Toolbelts tab.</summary>
+    public List<BeltSet> Belts { get; set; } = new();
 }
 
 public sealed record HistoryEntry(DateTime Time, string Text);
 
-/// <summary>Runs the steps, lane by lane. Checked twice a second from the loader's frame event.</summary>
+/// <summary>Runs the steps one at a time, in order. Checked twice a second from the loader's frame event.</summary>
 sealed class Queue
 {
     static readonly JsonSerializerOptions s_json = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
@@ -184,12 +213,8 @@ sealed class Queue
     public string Folder => _folder;
     public void Log(string message) => _log(message);
 
-    /// <summary>The step each lane is on, in lane order.</summary>
-    public IEnumerable<Step> CurrentSteps() =>
-        State.Steps.Where(s => !s.Done).GroupBy(LaneOf).OrderBy(g => g.Key).Select(g => g.First());
-
-    /// <summary>The lane a step runs in now (steps in lanes above the lane count run in the last lane).</summary>
-    public int LaneOf(Step s) => Math.Clamp(s.Lane, 1, Math.Max(1, State.Lanes));
+    /// <summary>The step the queue is on (the game runs one action at a time).</summary>
+    public IEnumerable<Step> CurrentSteps() => State.Steps.Where(s => !s.Done).Take(1);
 
     // ---- files ----
 
@@ -206,8 +231,6 @@ sealed class Queue
     {
         _character = character;
         State = Read(LiveFile) ?? new QueueState();
-        foreach (Step s in State.Steps) if (s.Lane < 1) s.Lane = 1;
-        if (State.Lanes < 1) State.Lanes = 1;
         LoadHistory();
         Status = State.Running ? "Resuming" : "Not running";
         Changed?.Invoke();
@@ -242,7 +265,7 @@ sealed class Queue
         if (name.Length == 0) return;
         Edit(() => State.Name = name);
         Write(Path.Combine(SavedFolder, name + ".json"),
-            new QueueState { Name = name, Loop = State.Loop, Lanes = State.Lanes, Idle = State.Idle, Steps = State.Steps.Select(s => s.Copy()).ToList() });
+            new QueueState { Name = name, Loop = State.Loop, Idle = State.Idle, Steps = State.Steps.Select(s => s.Copy()).ToList() });
     }
 
     public void LoadSaved(string name)
@@ -251,7 +274,12 @@ sealed class Queue
         if (q == null) return;
         Edit(() =>
         {
-            State = new QueueState { Name = q.Name, Loop = q.Loop, Lanes = Math.Max(1, q.Lanes), Idle = q.Idle, Steps = q.Steps.Select(s => s.Copy()).ToList() };
+            QueueState o = State; // options and gear sets belong to the character, not the saved queue
+            State = new QueueState
+            {
+                Name = q.Name, Loop = q.Loop, Idle = q.Idle, Steps = q.Steps.Select(s => s.Copy()).ToList(),
+                Alerts = o.Alerts, FoodGuard = o.FoodGuard, BankGuard = o.BankGuard, Hud = o.Hud, AutoGear = o.AutoGear, SkillGear = o.SkillGear, WeaponRestore = o.WeaponRestore, OffhandRestore = o.OffhandRestore, SlotRestore = o.SlotRestore, SlayerGauntlet = o.SlayerGauntlet, Belts = o.Belts, HudX = o.HudX, HudY = o.HudY, HudMin = o.HudMin,
+            };
             Status = $"Loaded \"{q.Name}\"";
         });
     }
@@ -300,12 +328,10 @@ sealed class Queue
 
     public void SetOption(Action<QueueState> set) => Edit(() => set(State));
 
-    public void SetLane(int i, int lane) => Edit(() => { if (i >= 0 && i < State.Steps.Count) State.Steps[i].Lane = Math.Clamp(lane, 1, 4); });
 
     public void Clear() => Edit(() => { State.Steps.Clear(); State.Running = false; State.Name = ""; Status = "Not running"; });
     public void SetLoop(bool on) => Edit(() => State.Loop = on);
     public void SetIdle(ActionRef? a) => Edit(() => State.Idle = a);
-    public void SetLanes(int n) => Edit(() => State.Lanes = Math.Clamp(n, 1, 4));
 
     /// <summary>Starts the queue; with <paramref name="from"/>, steps above it count as done.</summary>
     public void Start(int from = -1) => Edit(() =>
@@ -329,6 +355,13 @@ sealed class Queue
     {
         if (!game.Entities.TryGetObjectById(skillId, out GameEntity? e) || e == null) return 0;
         return e.Components.Values.OfType<ExperienceComponent>().FirstOrDefault()?.Level ?? 0;
+    }
+
+    public static int LevelCap(Game game, string skillId)
+    {
+        if (!game.Entities.TryGetObjectById(skillId, out GameEntity? e) || e == null) return 120;
+        int cap = e.Components.Values.OfType<ExperienceComponent>().FirstOrDefault()?.LevelCap ?? 120;
+        return cap > 0 ? cap : 120;
     }
 
     public static int BankCount(Game game, string itemId)
@@ -357,9 +390,13 @@ sealed class Queue
             bus?.ActionPerformed.Subscribe((sender, e) =>
             {
                 // Raised for every finished action (also on the offline thread); sub-steps like hunting's tracking are skipped.
-                if (e.IsSubAction || sender is not ActionComponent c) return;
+                if (e.IsSubAction || sender is not ActionComponent c || c.Entity is GamesByMalcs.Melvor2.Entities.Combat.CombatEntity) return;
                 lock (s_performed) s_performed[c.Entity.Id] = (s_performed.TryGetValue(c.Entity.Id, out long n) ? n : 0) + 1;
             });
+            // Combat does not report "action performed"; a kill is its action.
+            var combat = game.Entities.GetAllObjects().OfType<GamesByMalcs.Melvor2.Entities.Combat.CombatEntity>().FirstOrDefault();
+            if (combat != null)
+                combat.Enemy.Killed += (_, _) => { lock (s_performed) s_performed[combat.Id] = (s_performed.TryGetValue(combat.Id, out long n) ? n : 0) + 1; };
         }
         catch (Exception ex) { _log("Times goal unavailable: " + ex.Message); }
     }
@@ -382,6 +419,11 @@ sealed class Queue
                 {
                     int got = s.Begun ? BankCount(game, s.Item) - s.StartCount : 0;
                     return $"{got:N0} / {s.Amount:N0}{Eta(s, got, s.Amount - got)}";
+                }
+            case Goal.Gold:
+                {
+                    long gp = ShopSource.Gp(game);
+                    return $"{gp:N0} / {s.Amount:N0} GP";
                 }
             case Goal.Times: return $"{(s.Begun ? Performed(s.Action.Entity) - s.StartTimes : 0):N0} / {s.Amount:N0}";
             case Goal.Minutes:
@@ -409,6 +451,7 @@ sealed class Queue
         Goal.MoreItems => s.Begun && BankCount(game, s.Item) - s.StartCount >= s.Amount,
         Goal.Minutes => s.Begun && (DateTime.UtcNow - s.StartedUtc).TotalMinutes >= s.Amount,
         Goal.Times => s.Begun && Performed(s.Action.Entity) - s.StartTimes >= s.Amount,
+        Goal.Gold => ShopSource.Gp(game) >= s.Amount,
         _ => false,
     };
 
@@ -442,14 +485,13 @@ sealed class Queue
         List<Step> current = CurrentSteps().ToList();
         if (current.Count == 0) { Finish(game); return; }
 
-        bool alongside = State.Lanes > 1 && current.Count > 1;
         bool changed = false;
-        foreach (Step s in current) changed |= Run(game, s, now, alongside);
+        foreach (Step s in current) changed |= Run(game, s, now);
 
-        // When every lane is waiting, the idle action uses the free time.
+        // While the step waits for materials, the idle action uses the free time.
         List<Step> after = CurrentSteps().ToList();
         if (after.Count > 0 && after.All(s => s.Waiting) && State.Idle != null && !Starter.IsRunning(game, State.Idle))
-            Starter.Start(game, State.Idle);
+            { WearIdle(game); Starter.Start(game, State.Idle); }
 
         Status = string.Join("  +  ", after.Select(s => $"{Label(s)}: {(s.State.Length > 0 ? s.State : "starting")}"));
         if (changed) { Save(); Changed?.Invoke(); }
@@ -459,6 +501,12 @@ sealed class Queue
     public static string Label(Step s) =>
         s.IsBest ? s.Resolved != null ? $"{s.Action.Label} ({s.Resolved.Label[(s.Resolved.Label.IndexOf(':') + 1)..].Trim()})" : s.Action.Label : s.Action.Label;
 
+    void WearIdle(Game game)
+    {
+        if (!State.AutoGear || State.Idle == null || !Gear.IsCombat(game, State.Idle.Entity)) return;
+        if (State.SkillGear.TryGetValue(State.Idle.Entity, out string? id) && id.Length > 0) Gear.Swap(game, id);
+    }
+
     static bool BankFull(Game game)
     {
         ActionComponent? any = Catalog.AnyAction(game);
@@ -466,10 +514,10 @@ sealed class Queue
     }
 
     // One step's turn. Returns true when something visible changed.
-    bool Run(Game game, Step s, double now, bool alongside)
+    bool Run(Game game, Step s, double now)
     {
         int index = State.Steps.IndexOf(s);
-        string StartIt(ActionRef r) => alongside ? Starter.StartAlongside(game, r) : Starter.Start(game, r);
+        string StartIt(ActionRef r) => Starter.Start(game, r);
 
         if (s.IsSell)
         {
@@ -478,7 +526,20 @@ sealed class Queue
             return Skip(s, $"Sell {s.ItemName}: {sold}");
         }
 
-        if (!s.Begun && s.Goal is Goal.Level or Goal.BankCount && Reached(game, s))
+        if (s.IsShop)
+        {
+            if (now < s.RetryAt) return false;
+            string why = ShopSource.Buy(game, s);
+            if (why.Length == 0) return Done(s, $"{s.Action.Label}: {s.Amount:N0} {s.ItemName} in the bank", "done");
+            s.RetryAt = now + 10;
+            string state = "waiting: " + why;
+            if (s.State == state) return false;
+            s.State = state;
+            s.Waiting = true;
+            return true;
+        }
+
+        if (!s.Begun && s.Goal is Goal.Level or Goal.BankCount or Goal.Gold && Reached(game, s))
             return Done(s, $"{s.Action.Label}: goal already met", "skipped");
 
         // Train a skill: every 10 seconds, look for a better action than the one running (new unlocks as you level).
@@ -486,7 +547,7 @@ sealed class Queue
         if (s.IsBest && now >= s.BestCheckAt)
         {
             s.BestCheckAt = now + 10;
-            ActionRef? top = Starter.BestFor(game, s.Action.Entity)
+            ActionRef? top = Starter.BestFor(game, s.Action.Entity, s.IsGold)
                 .FirstOrDefault(c => !s.FailedUntil.TryGetValue(c.Target, out double until) || now >= until);
             if (top != null && (s.Resolved == null || s.Resolved.Target != top.Target))
             {
@@ -495,7 +556,15 @@ sealed class Queue
                 switched = true;
                 if (s.Begun) { s.Waiting = true; s.RetryAt = 0; }
             }
-            if (top == null && s.Resolved == null) { s.Waiting = true; s.State = "waiting: nothing to train yet"; }
+            if (top == null && s.Resolved == null)
+            {
+                s.Waiting = true;
+                s.State = s.IsGold ? (PlanData.Loaded == null ? "waiting: planner data not loaded" : "waiting: nothing makes GP with what you have") : "waiting: nothing to train yet";
+            }
+            // Most GP: turn what it made into GP.
+            if (s.IsGold && s.SellOutput && s.Resolved != null)
+                foreach (Item it in Catalog.Outputs(game, s.Resolved))
+                    if (Queue.BankCount(game, it.Id) > 0) Starter.Sell(game, it.Id, 0);
         }
         ActionRef act = s.Effective;
         if (s.IsBest && s.Resolved == null) return switched;
@@ -503,6 +572,28 @@ sealed class Queue
         if (!s.Begun || s.Waiting)
         {
             if (now < s.RetryAt) return switched;
+            // Combat loadout first, so the fight starts with the right gear. Only one combat step runs at a time.
+            if (State.AutoGear && Gear.Wanted(game, State, s) is string gear)
+            {
+                string? before = Gear.CurrentId(game);
+                string gerr = Gear.Swap(game, gear);
+                if (gerr.Length > 0) Note($"{Label(s)}: gear not changed, {gerr}");
+                else if (before != gear) Note($"{Label(s)}: wearing {Gear.Name(game, gear)}");
+            }
+            if (State.AutoGear && Gear.IsCombat(game, s.Action.Entity))
+            {
+                string setup = CombatSetup.Apply(game, State, s);
+                if (setup.Length > 0) Note($"{Label(s)}: {setup}");
+            }
+            // Toolbelt items the action needs (Warped Cacti: a Filtered Vial in the Woodcutting toolbelt).
+            string belt = Toolbelt.Prepare(game, act);
+            if (belt.Length > 0 && (s.Tries == 0 || belt.StartsWith("put"))) Note($"{Label(s)}: {belt}");
+            // The step's toolbelt set (refilled stock goes back on when a step resumes after a refill).
+            if (State.AutoGear && SetOf(s) is BeltSet set)
+            {
+                string put = Belts.Apply(game, set);
+                if (put.Length > 0 && (s.Tries == 0 || put.Contains("put on") || put.Contains("topped"))) Note($"{Label(s)}: {set.Name}: {put}");
+            }
             string why = StartIt(act);
             if (why.Length > 0)
             {
@@ -512,12 +603,12 @@ sealed class Queue
                     s.FailedUntil[act.Target] = now + 120;
                     s.Resolved = null;
                     s.BestCheckAt = 0;
-                    if (Starter.BestFor(game, s.Action.Entity).Any(c => !s.FailedUntil.TryGetValue(c.Target, out double u) || now >= u)) return true;
+                    if (Starter.BestFor(game, s.Action.Entity, s.IsGold).Any(c => !s.FailedUntil.TryGetValue(c.Target, out double u) || now >= u)) return true;
                 }
                 // Cannot start (usually missing materials or a level). Wait and retry; give up after about 10 minutes,
                 // or after a minute when nothing else could use the time.
                 s.Tries++;
-                if (s.Tries > 30 || (State.Idle == null && State.Lanes == 1 && s.Tries > 3))
+                if (s.Tries > 30 || (State.Idle == null && s.Tries > 3))
                     return Skip(s, $"{Label(s)}: {why}");
                 s.Waiting = true;
                 s.State = $"waiting: {why}";
@@ -540,6 +631,16 @@ sealed class Queue
 
         if (Reached(game, s)) return Done(s, $"{Label(s)}: done ({s.GoalText()})", "done");
 
+        // The state text is not saved: after a game restart a step that is already going has none yet.
+        if (s.State != "running" && Starter.IsRunning(game, act)) { s.State = "running"; return true; }
+
+        // A consumable in the step's toolbelt set ran out: refill it, then carry on.
+        if (State.AutoGear && now >= s.BeltCheckAt && SetOf(s) is BeltSet bset)
+        {
+            s.BeltCheckAt = now + 2;
+            if (Refill(game, s, bset, index, now)) return true;
+        }
+
         // Combat: stop before running out of food leaves the character fighting with nothing to eat.
         if (State.FoodGuard && OutOfFood(game, act))
         {
@@ -558,6 +659,53 @@ sealed class Queue
             if (why.Length > 0) { s.Waiting = true; s.RetryAt = 0; s.Tries = 0; s.State = $"waiting: {why}"; return true; }
         }
         return switched;
+    }
+
+    public BeltSet? SetOf(Step s) => s.Belt.Length == 0 ? null : State.Belts.FirstOrDefault(b => b.Id == s.Belt);
+
+    /// <summary>
+    /// Refills a used-up consumable from the step's toolbelt set: straight from the bank when it has some, otherwise
+    /// by planning the item (making or gathering what it needs) up to the set amount, in steps put before this one.
+    /// This step waits and resumes after them with its progress kept, putting the new stock on as it starts again.
+    /// </summary>
+    bool Refill(Game game, Step s, BeltSet set, int index, double now)
+    {
+        // Some in the bank: put it straight back.
+        foreach (BeltSlot bs in set.Slots.Where(b => b.Refill > 0))
+        {
+            if (Queue.BankCount(game, bs.Item) <= 0) continue;
+            var only = new BeltSet { Skill = set.Skill, Slots = new() { bs } };
+            if (Belts.OutOf(game, only) != null) { Note($"{Label(s)}: {Belts.Apply(game, only)}"); return true; }
+        }
+        BeltSlot? need = Belts.OutOf(game, set);
+        if (need == null || Queue.BankCount(game, need.Item) > 0) return false;
+
+        if (now - s.RefillWindowStart > 600) { s.RefillWindowStart = now; s.Refills = 0; }
+        if (s.Refills >= 3) return false;   // keeps failing: leave the step running without it
+        s.Refills++;
+        string name = Catalog.FindItem(game, need.Item)?.DisplayName.ToString() ?? need.Item;
+
+        PlanData? data = PlanData.Get(Folder, Log);
+        var steps = new List<Step>();
+        if (data != null)
+        {
+            var planner = new Planner(data, game);
+            List<PlanLine> lines = planner.Plan(need.Item, need.Refill, more: false);
+            planner.ResolveIds(lines);
+            steps = planner.ToSteps(lines);
+        }
+        if (steps.Count == 0)
+        {
+            Note($"{Label(s)}: out of {name}, and the planner has no way to make it; carrying on without it");
+            s.Refills = 3;
+            return true;
+        }
+        Edit(() => State.Steps.InsertRange(index, steps));
+        s.Waiting = true;
+        s.RetryAt = 0;
+        s.State = $"waiting: making {need.Refill:N0} {name}";
+        Note($"{Label(s)}: out of {name}; making {need.Refill:N0} first ({steps.Count} step{(steps.Count == 1 ? "" : "s")}), then back to this");
+        return true;
     }
 
     static bool OutOfFood(Game game, ActionRef act)
@@ -601,7 +749,8 @@ sealed class Queue
         }
         State.Running = false;
         Status = "Finished";
-        if (State.Idle != null) { Starter.Start(game, State.Idle); Status += $"; now {State.Idle.Label}"; }
+        if (State.AutoGear && CombatSetup.Restore(game, State) is { Length: > 0 } back) Note($"Queue finished: {back}");
+        if (State.Idle != null) { { WearIdle(game); Starter.Start(game, State.Idle); } Status += $"; now {State.Idle.Label}"; }
         Raise("Queue finished" + (State.Idle != null ? $"; now {State.Idle.Label}" : ""));
         Save();
         Changed?.Invoke();

@@ -28,6 +28,10 @@ if errorlevel 1 ( echo Loader build failed. & pause & exit /b 1 )
 ) > "%GAME%\override.cfg"
 if not exist "%GAME%\mods" mkdir "%GAME%\mods"
 
+rem Action Queue was renamed to Course in 0.6. Drop the old source and DLLs; Course moves the saved queues over on first launch.
+if exist "%~dp0Mods\ActionQueue\ActionQueue.csproj" rmdir /s /q "%~dp0Mods\ActionQueue"
+for %%F in (ActionQueue.dll ActionQueue.pdb ActionQueue.deps.json) do if exist "%GAME%\mods\ActionQueue\%%F" del /q "%GAME%\mods\ActionQueue\%%F"
+
 for /d %%M in ("%~dp0Mods\*") do (
   if exist "%%M\*.csproj" (
     echo Building %%~nxM...

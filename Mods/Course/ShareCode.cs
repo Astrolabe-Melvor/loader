@@ -6,19 +6,20 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using GamesByMalcs.Melvor2;
 
-namespace Astrolabe.ActionQueue;
+namespace Astrolabe.Course;
 
 /// <summary>
-/// Queues as text to paste anywhere: "AQ1:" + base64 of a small JSON. Ids are written without their namespace
+/// Queues as text to paste anywhere: "CRS1:" + base64 (older "AQ1:" codes still load) of a small JSON. Ids are written without their namespace
 /// ("Woodcutting:MahoganyTree"), so the Astrolabe wiki can write the same codes from its planner.
 /// </summary>
 /// <remarks>
-/// Format: { "lanes":1, "loop":false, "steps":[ { "a":"Skill:Action", "area":"Area", "g":"BankCount", "n":100,
-/// "i":"Item", "s":"Skill", "l":1 } ] }. "a" is "Skill:*best" to train a skill, "*sell" to sell "i".
+/// Format: { "loop":false, "steps":[ { "a":"Skill:Action", "area":"Area", "g":"BankCount", "n":100,
+/// "i":"Item", "s":"Skill", "l":1 } ] }. "a" is "Skill:*best" to train a skill, "*sell" to sell "i", "*shop:Purchase" to buy until the bank holds "n" of "i".
 /// </remarks>
 static class ShareCode
 {
-    const string Prefix = "AQ1:";
+    const string Prefix = "CRS1:";
+    const string OldPrefix = "AQ1:";
 
     public static string Export(QueueState q)
     {
@@ -27,31 +28,31 @@ static class ShareCode
         {
             var o = new JsonObject
             {
-                ["a"] = s.IsSell ? Starter.SellEntity : $"{Catalog.Local(s.Action.Entity)}:{(s.IsBest ? Starter.BestTarget : Catalog.Local(s.Action.Target))}",
+                ["a"] = s.IsSell ? Starter.SellEntity : s.IsShop ? $"{ShopSource.Entity}:{Catalog.Local(s.Action.Target)}" : $"{Catalog.Local(s.Action.Entity)}:{(s.IsBest ? s.Action.Target : Catalog.Local(s.Action.Target))}",
                 ["g"] = s.Goal.ToString(),
                 ["n"] = s.Amount,
             };
             if (s.Action.Area.Length > 0) o["area"] = Catalog.Local(s.Action.Area);
             if (s.Item.Length > 0) o["i"] = Catalog.Local(s.Item);
             if (s.Skill.Length > 0) o["s"] = Catalog.Local(s.Skill);
-            if (s.Lane > 1) o["l"] = s.Lane;
             steps.Add(o);
         }
-        var root = new JsonObject { ["lanes"] = q.Lanes, ["loop"] = q.Loop, ["steps"] = steps };
+        var root = new JsonObject { ["loop"] = q.Loop, ["steps"] = steps };
         return Prefix + Convert.ToBase64String(Encoding.UTF8.GetBytes(root.ToJsonString()));
     }
 
     /// <summary>Reads a code. Steps the game does not know are reported, not added.</summary>
-    public static (List<Step> Steps, int Lanes, List<string> Problems) Import(Game game, string code)
+    public static (List<Step> Steps, List<string> Problems) Import(Game game, string code)
     {
         var steps = new List<Step>();
         var problems = new List<string>();
         code = code.Trim();
-        if (!code.StartsWith(Prefix)) { problems.Add("That is not an Action Queue code (they start with AQ1:)."); return (steps, 1, problems); }
+        int skip = code.StartsWith(Prefix) ? Prefix.Length : code.StartsWith(OldPrefix) ? OldPrefix.Length : -1;
+        if (skip < 0) { problems.Add("That is not a Course code (they start with CRS1:)."); return (steps, problems); }
 
         JsonNode? root;
-        try { root = JsonNode.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(code[Prefix.Length..]))); }
-        catch { problems.Add("The code is damaged or incomplete."); return (steps, 1, problems); }
+        try { root = JsonNode.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(code[skip..]))); }
+        catch { problems.Add("The code is damaged or incomplete."); return (steps, problems); }
 
         var skills = Catalog.Skills(game);
         var items = Catalog.Items(game);
@@ -67,7 +68,6 @@ static class ShareCode
             {
                 Goal = Enum.TryParse(n["g"]?.GetValue<string>(), out Goal g) ? g : Goal.UntilStops,
                 Amount = n["n"]?.GetValue<int>() ?? 1,
-                Lane = n["l"]?.GetValue<int>() ?? 1,
             };
 
             string itemLocal = n["i"]?.GetValue<string>() ?? "";
@@ -86,13 +86,30 @@ static class ShareCode
                 continue;
             }
 
+            if (a.StartsWith(ShopSource.Entity + ":"))
+            {
+                var p = ShopSource.ById(game, a[(ShopSource.Entity.Length + 1)..]);
+                if (p == null) { problems.Add($"Unknown shop purchase in {a}"); continue; }
+                step.Action = ShopSource.Ref(p);
+                steps.Add(step);
+                continue;
+            }
+
             int colon = a.IndexOf(':');
+            if (a == $"{Starter.AnyEntity}:{Starter.GoldTarget}")
+            {
+                step.Action = new ActionRef { Entity = Starter.AnyEntity, Target = Starter.GoldTarget, Label = "Most GP: any skill" };
+                steps.Add(step);
+                continue;
+            }
             SkillChoice? skill = colon > 0 ? Skill(a[..colon]) : null;
             string target = colon > 0 ? a[(colon + 1)..] : "";
             if (skill == null) { problems.Add($"Unknown skill in {a}"); continue; }
 
             if (target == Starter.BestTarget)
                 step.Action = new ActionRef { Entity = skill.Id, Target = Starter.BestTarget, Label = $"Train {skill.Name}" };
+            else if (target == Starter.GoldTarget)
+                step.Action = new ActionRef { Entity = skill.Id, Target = Starter.GoldTarget, Label = $"Most GP: {skill.Name}" };
             else
             {
                 string area = n["area"]?.GetValue<string>() ?? "";
@@ -112,7 +129,6 @@ static class ShareCode
             }
             steps.Add(step);
         }
-        int lanes = root?["lanes"]?.GetValue<int>() ?? 1;
-        return (steps, Math.Clamp(lanes, 1, 4), problems);
+        return (steps, problems);
     }
 }

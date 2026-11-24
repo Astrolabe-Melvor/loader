@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Course</AssemblyName>
+    <RootNamespace>Astrolabe.Course</RootNamespace>
+    <Version>0.7.0</Version>
+    <Product>Astrolabe Course</Product>
+  </PropertyGroup>
+</Project>

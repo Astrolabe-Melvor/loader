@@ -9,7 +9,7 @@ using GamesByMalcs.Melvor2;
 using GamesByMalcs.Melvor2.Components.Experience;
 using GamesByMalcs.Melvor2.Entities;
 
-namespace Astrolabe.ActionQueue;
+namespace Astrolabe.Course;
 
 /// <summary>
 /// Per-hour rates for every action, published by the Astrolabe wiki build (plan.json). Downloaded once a day and
@@ -32,28 +32,57 @@ sealed class PlanData
     static Task? s_loading;
     public static string State { get; private set; } = "not loaded";
 
-    /// <summary>The data if it is ready; starts loading it otherwise.</summary>
+    /// <summary>Astrolabe Tools, when it runs on this PC, serves the same data with your own rates.</summary>
+    public const string ToolsUrl = "http://127.0.0.1:5320/api/plan";
+
+    /// <summary>Where the loaded rates came from, for the planner's note.</summary>
+    public static string Source { get; private set; } = "";
+    static DateTime s_loadedAt;
+
+    /// <summary>The data if it is ready; starts loading it otherwise. Refreshed in the background.</summary>
     public static PlanData? Get(string folder, Action<string> log)
     {
-        if (s_data != null || s_loading != null) return s_data;
+        if (s_loading != null && !s_loading.IsCompleted) return s_data;
         string file = Path.Combine(folder, "plan.json");
-        // Use the cached copy right away; refresh it in the background when it is a day old.
-        if (File.Exists(file)) s_data = TryParse(File.ReadAllText(file), log);
-        bool stale = !File.Exists(file) || DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > TimeSpan.FromDays(1);
-        if (stale) s_loading = Task.Run(async () =>
+        if (s_data == null && File.Exists(file)) { s_data = TryParse(File.ReadAllText(file), log); Source = "base game rates"; }
+
+        // Your own rates from Astrolabe Tools change as you play: look again every 5 minutes. The wiki copy is
+        // refreshed once a day.
+        bool fromTools = Source.StartsWith("your");
+        bool due = s_data == null || DateTime.UtcNow - s_loadedAt > TimeSpan.FromMinutes(fromTools ? 5 : 30);
+        if (!due) return s_data;
+        s_loadedAt = DateTime.UtcNow;
+        bool wikiStale = !File.Exists(file) || DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > TimeSpan.FromDays(1);
+        s_loading = Task.Run(async () =>
         {
+            using var http = new HttpClient();
+            try
+            {
+                State = "asking Astrolabe Tools";
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(2));
+                string json = await http.GetStringAsync(ToolsUrl, cts.Token);
+                PlanData? mine = TryParse(json, log);
+                if (mine != null)
+                {
+                    s_data = mine;
+                    Source = json.Contains("\"personal\":true") ? "your rates (gear, upgrades, mastery) from Astrolabe Tools" : "base game rates from Astrolabe Tools";
+                    State = "ready";
+                    return;
+                }
+            }
+            catch { /* Tools not running: fall back to the wiki's data */ }
+            if (!wikiStale && s_data != null) { State = "ready"; return; }
             try
             {
                 State = "downloading";
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+                http.Timeout = TimeSpan.FromSeconds(30);
                 string json = await http.GetStringAsync(Url);
                 PlanData? fresh = TryParse(json, log);
-                if (fresh != null) { File.WriteAllText(file, json); s_data = fresh; }
+                if (fresh != null) { File.WriteAllText(file, json); s_data = fresh; Source = "base game rates"; }
                 State = s_data != null ? "ready" : "download failed";
             }
             catch (Exception e) { State = s_data != null ? "ready (offline copy)" : "could not download: " + e.Message; log("plan.json: " + e.Message); }
         });
-        else State = s_data != null ? "ready" : "unreadable";
         return s_data;
     }
 
@@ -98,6 +127,10 @@ sealed class PlanLine
     public ActionRef? Action;
     public int LevelNeeded;          // above your level: level up first
     public string Problem = "";      // why this line can't run as is
+    public bool Drop;                // no skill makes it: a monster drops it (Action is that fight)
+    public string Shop = "";         // no skill makes it: bought from the shop (purchase id)
+    public string Cost = "";         // shop: what the packs cost in all
+    public bool Gold;                // the "earn GP for the shop" line (Item is GoldLine)
 }
 
 /// <summary>Works out the steps to get an item: the cheapest action for it, then the same for its ingredients.</summary>
@@ -109,6 +142,9 @@ sealed class Planner
     readonly Dictionary<string, int> _bank = new();
     Dictionary<string, double> _costNow = new(), _costAny = new();
     readonly Dictionary<string, double> _used = new();   // bank stock this plan already uses
+    readonly Dictionary<string, double> _shopHours = new();
+    /// <summary>A rough GP rate to turn shop prices into play time when comparing ways to get an item.</summary>
+    const double GpPerHour = 100_000;
 
     public Planner(PlanData data, Game game)
     {
@@ -119,6 +155,9 @@ sealed class Planner
             ExperienceComponent? xp = e.Components.Values.OfType<ExperienceComponent>().FirstOrDefault();
             if (xp != null) _levels[Local(e.Id)] = xp.Level;
         }
+        // Shop items bought with GP count as ingredients worth their price in play time, so actions that use them
+        // (arena runs need Arena Entry Tickets) are not dropped as impossible.
+        foreach (var (item, gp) in ShopSource.GpPrices(game)) _shopHours[item] = gp / GpPerHour;
         _costNow = Costs(anyLevel: false);
         _costAny = Costs(anyLevel: true);
     }
@@ -137,7 +176,7 @@ sealed class Planner
     // Hours of play per unit of each item (gathering counted in), found by relaxing until nothing improves.
     Dictionary<string, double> Costs(bool anyLevel)
     {
-        var cost = new Dictionary<string, double>();
+        var cost = new Dictionary<string, double>(_shopHours);
         double InCost(List<(string Item, double PerHour)> ins) =>
             ins.Sum(x => x.PerHour * (cost.TryGetValue(x.Item, out double c) ? c : double.PositiveInfinity));
         for (int pass = 0; pass < 12; pass++)
@@ -164,6 +203,8 @@ sealed class Planner
         _costNow.TryGetValue(item, out double a) ? a : _costAny.TryGetValue(item, out double b) ? b : double.PositiveInfinity;
 
     /// <summary>The steps, ingredients first. <paramref name="more"/>: make N more; otherwise own N in total.</summary>
+    public const string GoldLine = "*gp";
+
     public List<PlanLine> Plan(string item, int amount, bool more)
     {
         var lines = new Dictionary<string, PlanLine>();
@@ -175,6 +216,7 @@ sealed class Planner
 
         foreach (PlanLine l in lines.Values)
         {
+            if (l.Gold) { l.Have = (int)Math.Min(int.MaxValue, ShopSource.Gp(_game)); l.Target = (int)Math.Min(int.MaxValue, Math.Ceiling(l.Need)); continue; }
             l.Have = Bank(l.Item);
             l.Target = (int)Math.Ceiling(l.Have + l.Need);
             if (l.Item == item) l.Target = more ? have + amount : amount;
@@ -219,6 +261,59 @@ sealed class Planner
         }
         line.Need += need;
 
+        if (best == null && ShopSource.For(_game, item) is { } buy)
+        {
+            // No skill makes it, but the shop sells it: earn what it costs, then buy it.
+            string full = buy.Provides.Items.First(i => Catalog.Local(i.Item.Id) == item).Item.Id;
+            int per = Math.Max(1, ShopSource.PerPack(buy, full));
+            int packs = (int)Math.Ceiling(need / per);
+            line.Shop = buy.Id;
+            if (line.ItemName == item) line.ItemName = buy.Provides.Items.First(i => i.Item.Id == full).Item.DisplayName.ToString();
+            line.Action ??= ShopSource.Ref(buy);
+            s_fullIds[item] = full;
+            string needs = ShopSource.Needs(buy);
+            if (needs.Length > 0) line.Problem = "the shop needs " + needs;
+            var costs = new List<string>();
+            foreach (var c in buy.Costs.Currencies)
+            {
+                long total = c.Quantity * packs;
+                if (c.Currency.Id == ShopSource.Gold)
+                {
+                    costs.Add($"{total:N0} GP");
+                    if (!lines.TryGetValue(GoldLine, out PlanLine? gold))
+                    {
+                        lines[GoldLine] = gold = new PlanLine { Item = GoldLine, ItemName = "GP", Gold = true,
+                            Action = new ActionRef { Entity = Starter.AnyEntity, Target = Starter.GoldTarget, Label = "Most GP: any skill" } };
+                        order.Add(GoldLine);   // before every shop line, so the GP is there when they buy
+                    }
+                    gold.Need += total;
+                }
+                else
+                {
+                    costs.Add($"{total:N0} {c.Currency.DisplayName}");
+                    line.Problem = (line.Problem.Length > 0 ? line.Problem + "; " : "") + $"earn {total:N0} {c.Currency.DisplayName} yourself";
+                }
+            }
+            foreach (var i in buy.Costs.Items)
+            {
+                costs.Add($"{(long)i.Quantity * packs:N0} {i.Item.DisplayName}");
+                Expand(Catalog.Local(i.Item.Id), (double)i.Quantity * packs, lines, order, seen, depth + 1, root: false);
+            }
+            line.Cost = string.Join(", ", costs);
+            order.Remove(item);
+            order.Add(item);   // after what pays for it
+            return;
+        }
+
+        if (best == null && Catalog.MonsterFor(_game, item) is ActionChoice monster)
+        {
+            // No skill makes it, but a monster drops it: fight that monster until the bank holds enough.
+            line.Drop = true;
+            line.Action ??= monster.Ref;
+            if (monster.LockedNow) line.Problem = "that monster is locked for you now";
+            if (!order.Contains(item)) order.Add(item);
+            return;
+        }
         if (best == null)
         {
             line.Problem = "no action makes this: bring it yourself";
@@ -261,6 +356,16 @@ sealed class Planner
         foreach (PlanLine l in lines)
         {
             if (l.Action == null) continue;
+            if (l.Gold)
+            {
+                steps.Add(new Step { Action = l.Action, Goal = Goal.Gold, Amount = l.Target });
+                continue;
+            }
+            if (l.Shop.Length > 0)
+            {
+                steps.Add(new Step { Action = l.Action, Goal = Goal.BankCount, Amount = l.Target, Item = FullId(l), ItemName = l.ItemName });
+                continue;
+            }
             if (l.LevelNeeded > 0 && l.Rate != null)
             {
                 if (trained.TryGetValue(l.Rate.Skill, out Step? t)) t.Amount = Math.Max(t.Amount, l.LevelNeeded);
@@ -290,6 +395,7 @@ sealed class Planner
         };
     }
 
+    public static string FullIdOf(PlanLine l) => FullId(l);
     static string FullId(PlanLine l) => s_fullIds.TryGetValue(l.Item, out string? f) ? f : l.Item;
     static readonly Dictionary<string, string> s_fullIds = new();
 

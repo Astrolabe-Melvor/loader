@@ -20,7 +20,7 @@ using GamesByMalcs.Melvor2.Entities.Mining;
 using GamesByMalcs.Melvor2.Entities.Thieving;
 using GamesByMalcs.Melvor2.Entities.Woodcutting;
 
-namespace Astrolabe.ActionQueue;
+namespace Astrolabe.Course;
 
 /// <summary>An action the player can be doing: a skill's action component plus what it is working on.</summary>
 public sealed class ActionRef
@@ -41,6 +41,9 @@ static class Starter
 
     /// <summary>Target of the pseudo action "train this skill the fastest way" (picks the action as you level).</summary>
     public const string BestTarget = "*best";
+    /// <summary>Target of a "most GP" step; with <see cref="AnyEntity"/> it compares every skill.</summary>
+    public const string GoldTarget = "*gold";
+    public const string AnyEntity = "*any";
 
     /// <summary>Sells an item down to <paramref name="keep"/>. Locked stacks are never sold.</summary>
     public static string Sell(Game game, string itemId, int keep)
@@ -183,6 +186,36 @@ static class Starter
     /// The actions of a skill you can do now, best XP per hour first (from the wiki's rates when loaded, otherwise
     /// the game's own order, where later actions are the higher-level ones).
     /// </summary>
+    /// <summary>
+    /// The actions that make the most GP per hour now: what they make at its sell price, minus what they use. Only
+    /// actions you can do and whose inputs are in the bank. <paramref name="entityId"/> "*any": every skill.
+    /// </summary>
+    public static List<ActionRef> GoldFor(Game game, string entityId)
+    {
+        PlanData? data = PlanData.Loaded;
+        if (data == null) return new();
+        var skills = Catalog.Skills(game).Where(s => entityId == AnyEntity ? !Gear.IsCombat(game, s.Id) : s.Id == entityId).ToList();
+        var full = Catalog.Items(game).GroupBy(i => Catalog.Local(i.Id)).ToDictionary(g => g.Key, g => g.First().Id);
+        double Price(string local) =>
+            full.TryGetValue(local, out string? id) && Catalog.FindItem(game, id) is { } it && it.SellsFor != null ? it.SellsFor.Quantity : 0;
+        var scored = new List<(ActionRef Ref, double Gp)>();
+        foreach (SkillChoice skill in skills)
+        {
+            var rates = data.Rates.Where(r => r.Skill == skill.Name || r.Skill == Catalog.Local(skill.Id))
+                .GroupBy(r => Catalog.Local(r.Id[(r.Id.IndexOf(':') + 1)..])).ToDictionary(g => g.Key, g => g.First());
+            foreach (ActionChoice a in skill.Actions.Where(a => !a.LockedNow))
+            {
+                if (!rates.TryGetValue(Catalog.Local(a.Ref.Target), out var r)) continue;
+                if (r.In.Any(i => !full.TryGetValue(i.Item, out string? fid) || Queue.BankCount(game, fid) <= 0)) continue;
+                double gp = r.Out.Sum(o => o.PerHour * Price(o.Item)) - r.In.Sum(i => i.PerHour * Price(i.Item));
+                if (gp > 0) scored.Add((a.Ref, gp));
+            }
+        }
+        return scored.OrderByDescending(x => x.Gp).Select(x => x.Ref).ToList();
+    }
+
+    public static List<ActionRef> BestFor(Game game, string entityId, bool gold) => gold ? GoldFor(game, entityId) : BestFor(game, entityId);
+
     public static List<ActionRef> BestFor(Game game, string entityId)
     {
         SkillChoice? skill = Catalog.Skills(game).FirstOrDefault(s => s.Id == entityId);
@@ -200,25 +233,6 @@ static class Starter
         return open.OrderByDescending(x => x.i).Select(x => x.a.Ref).ToList();
     }
 
-    static System.Reflection.FieldInfo? s_activeField;
-
-    /// <summary>
-    /// Starts an action while the others keep running (side by side). The game stops every running action when
-    /// one starts; so the others are taken off its "running" list for that moment and put back afterwards.
-    /// Two steps of the same skill cannot run at once: the new one replaces the old.
-    /// </summary>
-    public static string StartAlongside(Game game, ActionRef r)
-    {
-        ActionComponent? comp = Component(game, r);
-        s_activeField ??= typeof(GamesByMalcs.Melvor2.Components.Actions.ActiveActionManager)
-            .GetField("_activeActions", BindingFlags.NonPublic | BindingFlags.Instance);
-        if (comp == null || s_activeField?.GetValue(game.ActionManager) is not System.Collections.Generic.List<ActionComponent> list)
-            return Start(game, r);
-        var keep = list.Where(a => a != comp).ToList();
-        foreach (ActionComponent k in keep) list.Remove(k);
-        try { return Start(game, r); }
-        finally { foreach (ActionComponent k in keep) if (k.IsStarted && !list.Contains(k)) list.Add(k); }
-    }
 
     static CombatAreasComponent? Areas(GameEntity entity) =>
         entity.Components.Values.OfType<CombatAreasComponent>().FirstOrDefault();
