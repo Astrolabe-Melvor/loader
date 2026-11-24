@@ -24,6 +24,7 @@ public enum Goal
     Minutes,      // for N minutes
     Times,        // until the action has been done N times
     Gold,         // until you have N GP (Most GP steps)
+    Technique,    // until an Agility technique (Item) reaches level N
 }
 
 public sealed class Step
@@ -70,7 +71,9 @@ public sealed class Step
     [JsonIgnore] public bool IsShop => Action.Entity == ShopSource.Entity;
     /// <summary>Fight slayer tasks, master after master (Action.Entity is the combat skill).</summary>
     [JsonIgnore] public bool IsSlayer => Action.Target == Slayer.Target;
-    [JsonIgnore] public bool IsBest => Action.Target == Starter.BestTarget || Action.Target == Starter.GoldTarget;
+    [JsonIgnore] public bool IsBest => Action.Target == Starter.BestTarget || Action.Target == Starter.GoldTarget || IsTech;
+    /// <summary>Train an Agility technique: the course and path giving it the most XP, switching as it levels.</summary>
+    [JsonIgnore] public bool IsTech => Action.Target.StartsWith(Finesse.TechPrefix);
     [JsonIgnore] public bool IsGold => Action.Target == Starter.GoldTarget;
     /// <summary>Most GP steps: sell what the action makes as it comes in (never locked bank stacks).</summary>
     public bool SellOutput { get; set; } = true;
@@ -90,6 +93,7 @@ public sealed class Step
         Goal.Times when IsSlayer => $"{Amount:N0} task{(Amount == 1 ? "" : "s")} done",
         Goal.Times => $"{Amount:N0} time{(Amount == 1 ? "" : "s")}",
         Goal.Gold => $"until you have {Amount:N0} GP",
+        Goal.Technique => $"until {ItemName} reaches level {Amount}",
         _ => "",
     };
 
@@ -145,6 +149,12 @@ public sealed class QueueState
     public bool SlayerRerollLocked { get; set; }
     /// <summary>Apply the reroll and extend rules all the time, not only while a Slayer tasks step runs.</summary>
     public bool SlayerAlways { get; set; }
+    /// <summary>Thieving and Agility steps (with no toolbelt set of their own) wear the best gear you own for them.</summary>
+    public bool FinesseGear { get; set; } = true;
+    /// <summary>While thieving or doing agility: keep the skill's buff food selected, and eat healing food when HP gets low.</summary>
+    public bool FinesseFood { get; set; } = true;
+    /// <summary>Also heal when HP drops below this percent (always when one failure could take the rest).</summary>
+    public int FinesseFloor { get; set; } = 30;
     /// <summary>Toolbelt sets per skill, made in the Toolbelts tab.</summary>
     public List<BeltSet> Belts { get; set; } = new();
 }
@@ -295,7 +305,7 @@ sealed class Queue
             {
                 Name = q.Name, Loop = q.Loop, Idle = q.Idle, Steps = q.Steps.Select(s => s.Copy()).ToList(),
                 Alerts = o.Alerts, FoodGuard = o.FoodGuard, BankGuard = o.BankGuard, Hud = o.Hud, AutoGear = o.AutoGear, SkillGear = o.SkillGear, WeaponRestore = o.WeaponRestore, OffhandRestore = o.OffhandRestore, SlotRestore = o.SlotRestore, SlayerGauntlet = o.SlayerGauntlet, Belts = o.Belts,
-                SlayerSkip = o.SlayerSkip, SlayerExtend = o.SlayerExtend, SlayerReserve = o.SlayerReserve, SlayerRerollLocked = o.SlayerRerollLocked, SlayerAlways = o.SlayerAlways, HudX = o.HudX, HudY = o.HudY, HudMin = o.HudMin,
+                SlayerSkip = o.SlayerSkip, SlayerExtend = o.SlayerExtend, SlayerReserve = o.SlayerReserve, SlayerRerollLocked = o.SlayerRerollLocked, SlayerAlways = o.SlayerAlways, FinesseGear = o.FinesseGear, FinesseFood = o.FinesseFood, FinesseFloor = o.FinesseFloor, HudX = o.HudX, HudY = o.HudY, HudMin = o.HudMin,
             };
             Status = $"Loaded \"{q.Name}\"";
         });
@@ -485,6 +495,8 @@ sealed class Queue
                     int got = s.Begun ? BankCount(game, s.Item) - s.StartCount : 0;
                     return $"{got:N0} / {s.Amount:N0}{Eta(s, got, s.Amount - got)}";
                 }
+            case Goal.Technique:
+                return $"level {Finesse.Technique(game, s.Item)?.Experience.Level ?? 0} / {s.Amount}";
             case Goal.Gold:
                 {
                     long gp = ShopSource.Gp(game);
@@ -517,13 +529,34 @@ sealed class Queue
         Goal.Minutes => s.Begun && (DateTime.UtcNow - s.StartedUtc).TotalMinutes >= s.Amount,
         Goal.Times => s.Begun && Performed(s.CountKey) - s.StartTimes >= s.Amount,
         Goal.Gold => ShopSource.Gp(game) >= s.Amount,
+        Goal.Technique => (Finesse.Technique(game, s.Item)?.Experience.Level ?? 0) >= s.Amount,
         _ => false,
     };
 
     // ---- running ----
 
     bool _bankFullNoted;
-    double _nextSlayer;
+    double _nextSlayer, _nextFeed, _buffAt;
+    string _buffFor = "", _foodNote = "";
+    GamesByMalcs.Melvor2.Data.Items.Item? _buff;
+
+    void Feed(Game game, double now)
+    {
+        ActionRef? cur = Starter.Current(game);
+        if (cur == null || !Finesse.Handles(game, cur.Entity)) return;
+        // The best buff food for what is running, worked out again every few minutes (levels and gear change it).
+        string key = cur.Entity + "|" + cur.Target;
+        if (key != _buffFor || now >= _buffAt)
+        {
+            _buffFor = key;
+            _buffAt = now + 180;
+            if (game.Entities.TryGetObjectById(cur.Entity, out GamesByMalcs.Melvor2.Entities.GameEntity? e) && e is GamesByMalcs.Melvor2.Components.CombatFood.IFoodEntity fe)
+                _buff = Finesse.BuffFood(game, fe, cur);
+        }
+        string did = Finesse.Feed(game, cur, _buff, State.FinesseFloor);
+        if (did.Length > 0 && did != _foodNote) Note($"{cur.Label}: {did}");
+        _foodNote = did.StartsWith("ate") ? "" : did;   // repeat "ate" notes, not "no healing food" ones
+    }
 
     public void Tick(Game? game, double now)
     {
@@ -537,6 +570,13 @@ sealed class Queue
         {
             _nextSlayer = now + 5;
             try { string did = Slayer.ApplyRules(game, State); if (did.Length > 0) Note("Slayer: " + did); } catch { }
+        }
+
+        // Thieving and agility food, whatever started the action: buff food on, heal before a failure can hurt.
+        if (State.FinesseFood && now >= _nextFeed && !GameAccess.IsComputingOffline)
+        {
+            _nextFeed = now + 0.5;
+            try { Feed(game, now); } catch (Exception e) { Log("Food: " + e.Message); }
         }
 
         if (!State.Running || now < _nextCheck) return;
@@ -614,7 +654,7 @@ sealed class Queue
             return true;
         }
 
-        if (!s.Begun && s.Goal is Goal.Level or Goal.BankCount or Goal.Gold && Reached(game, s))
+        if (!s.Begun && s.Goal is Goal.Level or Goal.BankCount or Goal.Gold or Goal.Technique && Reached(game, s))
             return Done(s, $"{s.Action.Label}: goal already met", "skipped");
 
         bool switched = false;
@@ -645,9 +685,9 @@ sealed class Queue
         if (s.IsBest && now >= s.BestCheckAt)
         {
             s.BestCheckAt = now + 10;
-            ActionRef? top = Starter.BestFor(game, s.Action.Entity, s.IsGold)
+            ActionRef? top = Starter.BestFor(game, s.Action.Entity, s.Action.Target)
                 .FirstOrDefault(c => !s.FailedUntil.TryGetValue(c.Target, out double until) || now >= until);
-            if (top != null && (s.Resolved == null || s.Resolved.Target != top.Target))
+            if (top != null && (s.Resolved == null || s.Resolved.Target != top.Target || s.Resolved.Area != top.Area))
             {
                 if (s.Resolved != null) Note($"{s.Action.Label}: switching to {top.Label}");
                 s.Resolved = top;
@@ -686,6 +726,17 @@ sealed class Queue
             // Toolbelt items the action needs (Warped Cacti: a Filtered Vial in the Woodcutting toolbelt).
             string belt = Toolbelt.Prepare(game, act);
             if (belt.Length > 0 && (s.Tries == 0 || belt.StartsWith("put"))) Note($"{Label(s)}: {belt}");
+            // Thieving and Agility: the best path, and the gear you own that gives the most XP for this target.
+            if (Finesse.Handles(game, act.Entity))
+            {
+                Finesse.PickPath(game, act);
+                if (State.FinesseGear && SetOf(s) == null)
+                {
+                    string worn = Finesse.BestGear(game, act);
+                    if (worn.Length > 0) Note($"{Label(s)}: {worn}");
+                }
+                _buffAt = 0;   // choose the buff food again with the new gear
+            }
             // The step's toolbelt set (refilled stock goes back on when a step resumes after a refill).
             if (State.AutoGear && SetOf(s) is BeltSet set)
             {
@@ -709,7 +760,7 @@ sealed class Queue
                     s.FailedUntil[act.Target] = now + 120;
                     s.Resolved = null;
                     s.BestCheckAt = 0;
-                    if (Starter.BestFor(game, s.Action.Entity, s.IsGold).Any(c => !s.FailedUntil.TryGetValue(c.Target, out double u) || now >= u)) return true;
+                    if (Starter.BestFor(game, s.Action.Entity, s.Action.Target).Any(c => !s.FailedUntil.TryGetValue(c.Target, out double u) || now >= u)) return true;
                 }
                 // Cannot start (usually missing materials or a level). Wait and retry; give up after about 10 minutes,
                 // or after a minute when nothing else could use the time.

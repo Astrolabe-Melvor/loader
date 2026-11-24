@@ -71,7 +71,7 @@ static class ShareCode
             };
 
             string itemLocal = n["i"]?.GetValue<string>() ?? "";
-            if (itemLocal.Length > 0)
+            if (itemLocal.Length > 0 && step.Goal != Goal.Technique)
             {
                 string? id = ItemId(itemLocal);
                 if (id == null) { problems.Add($"Unknown item {itemLocal}"); continue; }
@@ -112,6 +112,13 @@ static class ShareCode
                 step.Action = new ActionRef { Entity = skill.Id, Target = Slayer.Target, Label = "Slayer tasks" };
             else if (target == Starter.GoldTarget)
                 step.Action = new ActionRef { Entity = skill.Id, Target = Starter.GoldTarget, Label = $"Most GP: {skill.Name}" };
+            else if (target.StartsWith(Finesse.TechPrefix))
+            {
+                var tech = Finesse.Technique(game, target[Finesse.TechPrefix.Length..]);
+                if (tech == null) { problems.Add($"Unknown technique in {a}"); continue; }
+                step.Action = Finesse.TechRef(skill.Id, tech);
+                if (step.Goal == Goal.Technique) { step.Item = tech.Technique.Id; step.ItemName = tech.Technique.DisplayName.ToString(); }
+            }
             else
             {
                 string area = n["area"]?.GetValue<string>() ?? "";

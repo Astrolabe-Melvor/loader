@@ -4,6 +4,7 @@ using System.Linq;
 using GamesByMalcs.Melvor2;
 using GamesByMalcs.Melvor2.Components.Actions;
 using GamesByMalcs.Melvor2.Entities;
+using GamesByMalcs.Melvor2.Entities.Agility;
 using Godot;
 using MelvorModLoader;
 using Astrolabe.UI;
@@ -203,6 +204,12 @@ sealed class QueueWindow
         _optGear = Option("Put on each step's gear when it starts: combat loadouts, weapons and stances, and skill toolbelt sets with refills", s => s.AutoGear, (s, v) => s.AutoGear = v);
         _optGear.Toggled += _ => RefreshGearGrid();
         optBox.AddChild(Option("Wear a slayer gauntlet when a combat step's monster is one of your slayer tasks (puts your gloves back after)", s => s.SlayerGauntlet, (s, v) => s.SlayerGauntlet = v));
+        optBox.AddChild(Option("Thieving and Agility steps wear the gear you own that gives the most XP there (then the best loot), unless the step has a toolbelt set", s => s.FinesseGear, (s, v) => s.FinesseGear = v));
+        optBox.AddChild(Option("Thieving and Agility food: keep the skill's best bonus food (sushi, soup) selected, and switch to healing food before a failure could knock you out", s => s.FinesseFood, (s, v) => s.FinesseFood = v));
+        var floor = Kit.Spin(new SpinBox { MinValue = 0, MaxValue = 90, Suffix = "%", Value = _queue.State.FinesseFloor, CustomMinimumSize = new Vector2(100, 0) });
+        floor.ValueChanged += v => _queue.SetOption(s => s.FinesseFloor = (int)v);
+        floor.TooltipText = "Heal at this HP percent or below, as well as whenever one failure could take what's left.";
+        optBox.AddChild(Kit.Row(Kit.Label("Also heal below", null, 13, "Dim"), floor, Kit.Label("HP", null, 13, "Dim")));
         optBox.AddChild(Kit.Row(Kit.Btn("Put the panel back in its first spot", () => _queue.SetOption(s => { s.HudX = s.HudY = -1; s.HudMin = false; }))));
         foreach (CheckBox c in new[] { _optLoop, _optAlerts, _optFood, _optBank, _optHud, _optGear }) optBox.AddChild(c);
         optBox.AddChild(Kit.Label("Combat loadout", null, 15, "Heading"));
@@ -402,6 +409,13 @@ sealed class QueueWindow
             list.Add((Goal.Minutes, "time passes"));
             return list;
         }
+        if (_do.IsTech)
+        {
+            list.Add((Goal.Technique, "the technique reaches level"));
+            list.Add((Goal.Level, "a skill reaches"));
+            list.Add((Goal.Minutes, "time passes"));
+            return list;
+        }
         if (_do.IsBest)
         {
             if (_do.IsGold) list.Add((Goal.Gold, "I have this much GP"));
@@ -436,7 +450,7 @@ sealed class QueueWindow
     void OnActionPicked()
     {
         Game? game = GameAccess.CurrentGame;
-        if (game != null && !_do.IsSell) FillGoals(game, _do.IsBest ? Goal.Level : null);
+        if (game != null && !_do.IsSell) FillGoals(game, _do.IsTech ? Goal.Technique : _do.IsBest ? Goal.Level : null);
         RefreshTargets();
         Suggest();
     }
@@ -454,7 +468,7 @@ sealed class QueueWindow
         _keep.Visible = sell;
         _amount.Visible = sell || g != Goal.UntilStops;
         _target.Visible = sell || g is Goal.BankCount or Goal.MoreItems or Goal.Level;
-        _amount.Prefix = g == Goal.Level && !sell ? "level" : "";
+        _amount.Prefix = g is Goal.Level or Goal.Technique && !sell ? "level" : "";
         _amount.Suffix = sell ? "" : g switch { Goal.Minutes => "min", Goal.Times => _do.IsSlayer ? "tasks" : "times", Goal.Gold => "GP", _ => "" };
         // "sell [item] keep [n]", "a skill reaches [skill] [level n]", "the bank holds [n] [item]"
         bool targetFirst = sell || g == Goal.Level;
@@ -533,6 +547,10 @@ sealed class QueueWindow
             case Goal.Times: SetAmount(1, 10_000_000, 100); break;
             case Goal.Minutes: SetAmount(1, 100_000, 60); break;
             case Goal.Gold: SetAmount(1, 2_000_000_000, (int)Math.Min(2_000_000_000, ShopSource.Gp(game) + 100_000)); break;
+            case Goal.Technique when _do.SelectedTech is { } tech:
+                int tl = tech.Experience.Level, tc = tech.Experience.LevelCap;
+                SetAmount(Math.Min(tl + 1, tc), tc, Math.Min(tl + 1, tc));
+                break;
             default: UpdateSummary(); break;
         }
     }
@@ -575,6 +593,7 @@ sealed class QueueWindow
         }
         var warn = new List<string>();
         string text = $"{Queue.Label(s)}, {s.GoalText()}";
+        if (!s.IsSell && !s.IsBest && Finesse.RateNote(game, s.Action) is { Length: > 0 } rate) text += $" ({rate})";
         if (s.IsSell)
         {
             int have = Queue.BankCount(game, s.Item);
@@ -682,6 +701,12 @@ sealed class QueueWindow
             if (t == null) return null;
             if (s.Goal == Goal.Level) { s.Skill = t.Id; s.SkillName = t.Text; }
             else { s.Item = t.Id; s.ItemName = t.Text; }
+        }
+        if (s.Goal == Goal.Technique)
+        {
+            if (_do.SelectedTech is not { } tech) return null;
+            s.Item = tech.Technique.Id;
+            s.ItemName = tech.Technique.DisplayName.ToString();
         }
         return s;
     }
@@ -1256,7 +1281,10 @@ sealed class ActionPicker
     SkillChoice? Skill => _skills.FirstOrDefault(s => s.Id == SkillId);
 
     public bool IsSell => SkillId == SellId;
-    public bool IsBest => IsAny || ActionPick.SelectedId == Starter.BestTarget || ActionPick.SelectedId == Starter.GoldTarget;
+    public bool IsBest => IsAny || IsTech || ActionPick.SelectedId == Starter.BestTarget || ActionPick.SelectedId == Starter.GoldTarget;
+    public bool IsTech => ActionPick.SelectedId?.StartsWith(Finesse.TechPrefix) == true;
+    public ActiveAgilityTechnique? SelectedTech =>
+        IsTech && GameAccess.CurrentGame is { } g ? Finesse.Technique(g, ActionPick.SelectedId![Finesse.TechPrefix.Length..]) : null;
     public bool IsGold => IsAny || ActionPick.SelectedId == Starter.GoldTarget;
     public bool IsAny => SkillId == AnyId;
     public bool IsSlayer => ActionPick.SelectedId == Slayer.Target;
@@ -1272,6 +1300,7 @@ sealed class ActionPicker
             SkillChoice? s = Skill;
             if (s == null) return null;
             if (IsGold) return new ActionRef { Entity = s.Id, Target = Starter.GoldTarget, Label = $"Most GP: {s.Name}" };
+            if (SelectedTech is { } tech) return Finesse.TechRef(s.Id, tech);
             if (IsBest) return new ActionRef { Entity = s.Id, Target = Starter.BestTarget, Label = $"Train {s.Name}" };
             if (IsSlayer) return new ActionRef { Entity = s.Id, Target = Slayer.Target, Label = "Slayer tasks" };
             return SelectedChoice?.Ref;
@@ -1309,6 +1338,9 @@ sealed class ActionPicker
         if (_allowBest) picks.Add(new PickItem(Starter.BestTarget, "Fastest XP (switches as you level)", s.Icon, Note: "train"));
         if (_allowBest && !Gear.IsCombat(GameAccess.CurrentGame!, s.Id)) picks.Add(new PickItem(Starter.GoldTarget, "Most GP (switches as you level)", s.Icon, Note: "gold"));
         if (_allowBest && Gear.IsCombat(GameAccess.CurrentGame!, s.Id)) picks.Add(new PickItem(Slayer.Target, "Slayer tasks (follows your tasks)", s.Icon, Note: "slayer"));
+        if (_allowBest && Finesse.Agility(GameAccess.CurrentGame!)?.Entity.Id == s.Id)
+            foreach (var t in Finesse.Techniques(GameAccess.CurrentGame!))
+                picks.Add(new PickItem(Finesse.TechPrefix + t.Technique.Id, $"Train {t.Technique.DisplayName} technique (level {t.Experience.Level}/{t.Experience.LevelCap})", s.Icon, Note: "technique"));
         picks.AddRange(s.Actions.Select(a => new PickItem(Key(a.Ref), a.Name, a.Icon, a.LockedNow, a.LockedNow ? (a.Key != null && Catalog.QuestOnly(a.Key) ? "needs its quest" : "locked") : "")));
         // Default to the best action you can do now.
         string? best = s.Actions.LastOrDefault(a => !a.LockedNow) is ActionChoice open ? Key(open.Ref) : null;
@@ -1323,7 +1355,7 @@ sealed class ActionPicker
         if (si < 0) return;
         SkillBox.Select(si);
         FillActions();
-        ActionPick.Select(r.Target is Starter.BestTarget or Starter.GoldTarget or Slayer.Target ? r.Target : Key(r));
+        ActionPick.Select(r.Target is Starter.BestTarget or Starter.GoldTarget or Slayer.Target || r.Target.StartsWith(Finesse.TechPrefix) ? r.Target : Key(r));
     }
 
     public void UseCurrent()

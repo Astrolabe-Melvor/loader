@@ -18,7 +18,7 @@ using MelvorModLoader;
 
 namespace Astrolabe.Beacon;
 
-public enum Kind { LevelUp, Pet, NewItem, LowFood, NoFood, BankFull, Idle, ShopBought, ShopUnlocked }
+public enum Kind { LevelUp, Pet, NewItem, LowFood, NoFood, BankFull, Idle, ShopBought, ShopUnlocked, Farming }
 
 /// <summary>How one kind of alert is delivered.</summary>
 public sealed class Rule
@@ -68,6 +68,7 @@ public sealed class Watcher
         [Kind.Idle] = "Nothing is running",
         [Kind.ShopBought] = "Hold buys something by your shop rules",
         [Kind.ShopUnlocked] = "A shop purchase you have a rule for unlocks",
+        [Kind.Farming] = "Farming or ranching needs you (from Deckhand: can't pay automation or a repair, bank full at harvest, no compost)",
     };
 
     readonly string _folder;
@@ -176,6 +177,7 @@ public sealed class Watcher
         [Kind.Idle] = ("Doing nothing", 0xA7A49B),
         [Kind.ShopBought] = ("Bought from the shop", 0x8FD46F),
         [Kind.ShopUnlocked] = ("Shop purchase unlocked", 0x8EC9EE),
+        [Kind.Farming] = ("Farming or ranching needs you", 0xF0C348),
     };
 
     /// <summary>What the character is up to, for the Discord post.</summary>

@@ -153,6 +153,7 @@ static class Starter
                     {
                         var course = ag.Courses.FirstOrDefault(kv => kv.Key.Id == r.Target).Value;
                         if (course == null) return "course not found";
+                        Finesse.PickPath(game, r);
                         ag.SelectCourse(course);
                         break;
                     }
@@ -216,8 +217,16 @@ static class Starter
 
     public static List<ActionRef> BestFor(Game game, string entityId, bool gold) => gold ? GoldFor(game, entityId) : BestFor(game, entityId);
 
+    /// <summary>For a step: Most GP, train a technique (Agility), or Fastest XP.</summary>
+    public static List<ActionRef> BestFor(Game game, string entityId, string target) =>
+        target == GoldTarget ? GoldFor(game, entityId)
+        : target.StartsWith(Finesse.TechPrefix) ? Finesse.BestForTechnique(game, target[Finesse.TechPrefix.Length..])
+        : BestFor(game, entityId);
+
     public static List<ActionRef> BestFor(Game game, string entityId)
     {
+        // Thieving and Agility: rank by the game's live success chances instead of the plan's base rates.
+        if (Finesse.BestFor(game, entityId) is { } live) return live;
         SkillChoice? skill = Catalog.Skills(game).FirstOrDefault(s => s.Id == entityId);
         if (skill == null) return new();
         var open = skill.Actions.Select((a, i) => (a, i)).Where(x => !x.a.LockedNow).ToList();

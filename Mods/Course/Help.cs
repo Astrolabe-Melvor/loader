@@ -10,6 +10,11 @@ Pick a skill and an action, then what "done" means: the bank holds an amount, yo
 [b]Fastest XP[/b] and [b]Most GP[/b] pick the best action for the skill and switch as you level.
 [b]Slayer tasks[/b] (Combat): fights the highest master's task it can, moves to the next task when one is done, until a number of tasks, a level or a time. [i]Undo[/i] under the step list takes back the last change (an edit, a move, a removal).
 
+[b]Thieving and Agility[/b]
+[i]Fastest XP[/i] ranks targets by the game's live numbers: your success chance, stages, stun time and interval for thieving; each obstacle's chance and time for agility (a fail sends you back to the start), and it picks each course's best path. Targets that need a key or lockpick count only if you have one; arenas only if you can pay entry. Steps wear the gear you own that gives the most XP there, then the best loot (thieving) or least damage (agility), unless the step has its own toolbelt set. Food: the skill's best bonus food (sushi for stealth, soup for agility) stays selected; when HP drops below the percent in Options, or to where one failure could push it to the game's auto-eat threshold (so auto-eat never spends the sushi), it switches to your biggest healing food, eats up, and switches back.
+
+[b]Train a technique[/b] (Agility only): picks the course and path giving that technique the most XP per hour and switches as it levels. Technique levels raise your chance on obstacles at or below their difficulty, so the ranking moves as you train. Goal: until the technique reaches a level. The step summary lists technique XP/h for the current path. All of this can be turned off in Options.
+
 [b]Slayer tab[/b]
 Every master's task, kills and costs. Extend, reroll or fight a task by hand; turn the game's Auto Slayer on or off. Rules: extend a master's tasks as they come, always reroll monsters you list, reroll tasks in areas you can't enter, all keeping a coin reserve. Rules run during Slayer tasks steps, or all the time if you tick it.
 
