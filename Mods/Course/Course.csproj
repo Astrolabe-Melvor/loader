@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Course</AssemblyName>
     <RootNamespace>Astrolabe.Course</RootNamespace>
-    <Version>0.7.0</Version>
+    <Version>0.8.0</Version>
     <Product>Astrolabe Course</Product>
   </PropertyGroup>
 </Project>

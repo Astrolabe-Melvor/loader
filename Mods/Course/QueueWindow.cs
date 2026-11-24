@@ -17,15 +17,16 @@ namespace Astrolabe.Course;
 /// </summary>
 sealed class QueueWindow
 {
-    static readonly string[] s_tabNames = { "Add a step", "Plan an item", "Saved and shared", "History", "Options", "Toolbelts" };
+    static readonly string[] s_tabNames = { "Add a step", "Plan an item", "Saved and shared", "History", "Options", "Toolbelts", "Slayer" };
     static readonly Color s_currentRow = new(0.18f, 0.43f, 0.18f, 0.35f);
 
     readonly Queue _queue;
     readonly KitWindow _win;
     readonly OptionButton _queuePick;
     readonly Button _run;
-    readonly Button[] _tabs = new Button[6];
-    readonly Control[] _panels = new Control[6];
+    readonly Button[] _tabs = new Button[7];
+    readonly Control[] _panels = new Control[7];
+    SlayerPanel _slayer = null!;
     readonly BeltEditor _beltEditor;
     readonly OptionButton _belt;
     readonly HBoxContainer _beltRow, _goldRow;
@@ -102,7 +103,8 @@ sealed class QueueWindow
             _tabs[i].ToggleMode = true;
             tabRow.AddChild(_tabs[i]);
         }
-        tabRow.MoveChild(_tabs[5], 3);   // Toolbelts sits before History
+        tabRow.MoveChild(_tabs[5], 3);   // Toolbelts and Slayer sit before History
+        tabRow.MoveChild(_tabs[6], 4);
         _win.Body.AddChild(tabRow);
 
         // ---- add a step ----
@@ -183,6 +185,7 @@ sealed class QueueWindow
 
         // ---- history ----
         _beltEditor = new BeltEditor(_queue, Panel(5));
+        _slayer = new SlayerPanel(_queue, Panel(6));
 
         var historyBox = Panel(3);
         _history = new ItemList { CustomMinimumSize = new Vector2(0, 150), SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -224,6 +227,7 @@ sealed class QueueWindow
             Kit.Btn("Down", () => WithStep(i => { _selected = Math.Min(_queue.State.Steps.Count - 1, i + 1); _queue.Move(i, 1); })),
             Kit.Btn("Remove", () => WithStep(i => { _selected = -1; _queue.Remove(i); })),
             Kit.Btn("Run from here", () => WithStep(i => { _tabPinned = false; _queue.Start(i); })),
+            _undo = Kit.Btn("Undo", () => _queue.Undo()),
             Kit.Spacer(),
             _stepHint = Kit.Label("drag rows to reorder, double-click to edit", null, 12, "Dim"),
             Kit.Btn("Remove all", _queue.Clear)));
@@ -336,9 +340,11 @@ sealed class QueueWindow
         if (which == 3) RefreshHistory();
         if (which == 4) RefreshOptions();
         if (which == 5) _beltEditor.Refresh();
+        if (which == 6) _slayer.Refresh();
         if (which == 0) RefreshTargets();   // picks up gear and option changes made on other tabs
     }
 
+    Button _undo = null!;
     Label _stepHint = null!;
 
     void WithStep(Action<int> act)
@@ -389,6 +395,13 @@ sealed class QueueWindow
     {
         var list = new List<(Goal, string)>();
         if (a == null) return list;
+        if (_do.IsSlayer)
+        {
+            list.Add((Goal.Times, "this many tasks are done"));
+            list.Add((Goal.Level, "a skill reaches"));
+            list.Add((Goal.Minutes, "time passes"));
+            return list;
+        }
         if (_do.IsBest)
         {
             if (_do.IsGold) list.Add((Goal.Gold, "I have this much GP"));
@@ -442,7 +455,7 @@ sealed class QueueWindow
         _amount.Visible = sell || g != Goal.UntilStops;
         _target.Visible = sell || g is Goal.BankCount or Goal.MoreItems or Goal.Level;
         _amount.Prefix = g == Goal.Level && !sell ? "level" : "";
-        _amount.Suffix = sell ? "" : g switch { Goal.Minutes => "min", Goal.Times => "times", Goal.Gold => "GP", _ => "" };
+        _amount.Suffix = sell ? "" : g switch { Goal.Minutes => "min", Goal.Times => _do.IsSlayer ? "tasks" : "times", Goal.Gold => "GP", _ => "" };
         // "sell [item] keep [n]", "a skill reaches [skill] [level n]", "the bank holds [n] [item]"
         bool targetFirst = sell || g == Goal.Level;
         _goalRow.MoveChild(_target.Button, targetFirst ? 2 : 4);
@@ -516,6 +529,7 @@ sealed class QueueWindow
                 SetAmount(1, 10_000_000, have + 100);
                 break;
             case Goal.MoreItems: SetAmount(1, 10_000_000, 100); break;
+            case Goal.Times when _do.IsSlayer: SetAmount(1, 10_000, 5); break;
             case Goal.Times: SetAmount(1, 10_000_000, 100); break;
             case Goal.Minutes: SetAmount(1, 100_000, 60); break;
             case Goal.Gold: SetAmount(1, 2_000_000_000, (int)Math.Min(2_000_000_000, ShopSource.Gp(game) + 100_000)); break;
@@ -984,9 +998,16 @@ sealed class QueueWindow
     void UpdateCombatNote(Game game)
     {
         ActionRef? a = _do.Selected;
+        if (a?.Target == Slayer.Target)
+        {
+            _combatNote.Text = Slayer.Summary(game) + " The step fights the highest master's task it can, moves on when one is done, and follows the Slayer tab's reroll and extend rules. Weapon and stance are picked per monster.";
+            return;
+        }
         var enemies = a == null ? new List<GamesByMalcs.Melvor2.Entities.Combat.Enemy>() : CombatSetup.Enemies(game, a);
         if (enemies.Count == 0) { _combatNote.Text = ""; return; }
         string text = CombatSetup.DefenceText(game, enemies);
+        string task = Slayer.TaskNote(game, enemies);
+        if (task.Length > 0) text = task + " " + text;
         var lw = CombatSetup.LoadoutWeapon(game, LoadoutInEffect(game), out string own);
         if (lw != null)
         {
@@ -1075,6 +1096,8 @@ sealed class QueueWindow
     {
         var st = _queue.State;
         _run.Text = st.Running ? "Pause" : "Start";
+        _undo.Disabled = _queue.UndoWhat.Length == 0;
+        _undo.TooltipText = _queue.UndoWhat.Length == 0 ? "Nothing to undo" : "Undo: " + _queue.UndoWhat;
         RefreshQueuePick();
         if (st.Running && !_tabPinned && _panels.Any(p => p.Visible)) ShowTab(-1);
         if (_tab == 3 && _panels[3].Visible) RefreshHistory();
@@ -1236,6 +1259,7 @@ sealed class ActionPicker
     public bool IsBest => IsAny || ActionPick.SelectedId == Starter.BestTarget || ActionPick.SelectedId == Starter.GoldTarget;
     public bool IsGold => IsAny || ActionPick.SelectedId == Starter.GoldTarget;
     public bool IsAny => SkillId == AnyId;
+    public bool IsSlayer => ActionPick.SelectedId == Slayer.Target;
     public bool IsEmpty => _skills.Count == 0;
 
     public ActionChoice? SelectedChoice => Skill?.Actions.FirstOrDefault(a => Key(a.Ref) == ActionPick.SelectedId);
@@ -1249,6 +1273,7 @@ sealed class ActionPicker
             if (s == null) return null;
             if (IsGold) return new ActionRef { Entity = s.Id, Target = Starter.GoldTarget, Label = $"Most GP: {s.Name}" };
             if (IsBest) return new ActionRef { Entity = s.Id, Target = Starter.BestTarget, Label = $"Train {s.Name}" };
+            if (IsSlayer) return new ActionRef { Entity = s.Id, Target = Slayer.Target, Label = "Slayer tasks" };
             return SelectedChoice?.Ref;
         }
     }
@@ -1283,6 +1308,7 @@ sealed class ActionPicker
         var picks = new List<PickItem>();
         if (_allowBest) picks.Add(new PickItem(Starter.BestTarget, "Fastest XP (switches as you level)", s.Icon, Note: "train"));
         if (_allowBest && !Gear.IsCombat(GameAccess.CurrentGame!, s.Id)) picks.Add(new PickItem(Starter.GoldTarget, "Most GP (switches as you level)", s.Icon, Note: "gold"));
+        if (_allowBest && Gear.IsCombat(GameAccess.CurrentGame!, s.Id)) picks.Add(new PickItem(Slayer.Target, "Slayer tasks (follows your tasks)", s.Icon, Note: "slayer"));
         picks.AddRange(s.Actions.Select(a => new PickItem(Key(a.Ref), a.Name, a.Icon, a.LockedNow, a.LockedNow ? (a.Key != null && Catalog.QuestOnly(a.Key) ? "needs its quest" : "locked") : "")));
         // Default to the best action you can do now.
         string? best = s.Actions.LastOrDefault(a => !a.LockedNow) is ActionChoice open ? Key(open.Ref) : null;
@@ -1297,7 +1323,7 @@ sealed class ActionPicker
         if (si < 0) return;
         SkillBox.Select(si);
         FillActions();
-        ActionPick.Select(r.Target is Starter.BestTarget or Starter.GoldTarget ? r.Target : Key(r));
+        ActionPick.Select(r.Target is Starter.BestTarget or Starter.GoldTarget or Slayer.Target ? r.Target : Key(r));
     }
 
     public void UseCurrent()

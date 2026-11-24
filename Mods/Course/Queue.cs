@@ -11,6 +11,7 @@ using GamesByMalcs.Melvor2.Components.Experience;
 using GamesByMalcs.Melvor2.Data.Items;
 using GamesByMalcs.Melvor2.Entities;
 using GamesByMalcs.Melvor2.EventBus;
+using MelvorModLoader;
 
 namespace Astrolabe.Course;
 
@@ -67,12 +68,16 @@ public sealed class Step
     [JsonIgnore] public bool IsSell => Action.Entity == Starter.SellEntity;
     /// <summary>Buy from the shop (Action.Target is the purchase id) until the bank holds Amount of Item.</summary>
     [JsonIgnore] public bool IsShop => Action.Entity == ShopSource.Entity;
+    /// <summary>Fight slayer tasks, master after master (Action.Entity is the combat skill).</summary>
+    [JsonIgnore] public bool IsSlayer => Action.Target == Slayer.Target;
     [JsonIgnore] public bool IsBest => Action.Target == Starter.BestTarget || Action.Target == Starter.GoldTarget;
     [JsonIgnore] public bool IsGold => Action.Target == Starter.GoldTarget;
     /// <summary>Most GP steps: sell what the action makes as it comes in (never locked bank stacks).</summary>
     public bool SellOutput { get; set; } = true;
     /// <summary>The action to run: the step's own, or for "train a skill" the one picked for now.</summary>
-    [JsonIgnore] public ActionRef Effective => IsBest ? Resolved ?? Action : Action;
+    [JsonIgnore] public ActionRef Effective => IsBest || IsSlayer ? Resolved ?? Action : Action;
+    /// <summary>What the Times goal counts: finished tasks for a Slayer tasks step, else the skill's actions (kills in combat).</summary>
+    [JsonIgnore] public string CountKey => IsSlayer ? Slayer.DoneKey : Action.Entity;
 
     public string GoalText() => Goal switch
     {
@@ -82,6 +87,7 @@ public sealed class Step
         Goal.BankCount => $"until {Amount:N0} {ItemName} in the bank",
         Goal.MoreItems => $"until {Amount:N0} more {ItemName}",
         Goal.Minutes => $"for {Amount} minute{(Amount == 1 ? "" : "s")}",
+        Goal.Times when IsSlayer => $"{Amount:N0} task{(Amount == 1 ? "" : "s")} done",
         Goal.Times => $"{Amount:N0} time{(Amount == 1 ? "" : "s")}",
         Goal.Gold => $"until you have {Amount:N0} GP",
         _ => "",
@@ -129,6 +135,16 @@ public sealed class QueueState
     /// <summary>"loadout|slot" to the item that slot held before a step changed it (the slayer gauntlet's gloves).</summary>
     public Dictionary<string, string> SlotRestore { get; set; } = new();
     public bool SlayerGauntlet { get; set; } = true;   // wear a slayer gauntlet when the monster is a slayer task
+    /// <summary>Monsters (enemy ids) to reroll whenever a master gives them as a task.</summary>
+    public HashSet<string> SlayerSkip { get; set; } = new();
+    /// <summary>Masters (ids) whose tasks are extended as soon as they are given.</summary>
+    public HashSet<string> SlayerExtend { get; set; } = new();
+    /// <summary>Rerolls and extensions never take slayer coins below this.</summary>
+    public long SlayerReserve { get; set; }
+    /// <summary>Reroll tasks in areas you can't enter yet.</summary>
+    public bool SlayerRerollLocked { get; set; }
+    /// <summary>Apply the reroll and extend rules all the time, not only while a Slayer tasks step runs.</summary>
+    public bool SlayerAlways { get; set; }
     /// <summary>Toolbelt sets per skill, made in the Toolbelts tab.</summary>
     public List<BeltSet> Belts { get; set; } = new();
 }
@@ -278,7 +294,8 @@ sealed class Queue
             State = new QueueState
             {
                 Name = q.Name, Loop = q.Loop, Idle = q.Idle, Steps = q.Steps.Select(s => s.Copy()).ToList(),
-                Alerts = o.Alerts, FoodGuard = o.FoodGuard, BankGuard = o.BankGuard, Hud = o.Hud, AutoGear = o.AutoGear, SkillGear = o.SkillGear, WeaponRestore = o.WeaponRestore, OffhandRestore = o.OffhandRestore, SlotRestore = o.SlotRestore, SlayerGauntlet = o.SlayerGauntlet, Belts = o.Belts, HudX = o.HudX, HudY = o.HudY, HudMin = o.HudMin,
+                Alerts = o.Alerts, FoodGuard = o.FoodGuard, BankGuard = o.BankGuard, Hud = o.Hud, AutoGear = o.AutoGear, SkillGear = o.SkillGear, WeaponRestore = o.WeaponRestore, OffhandRestore = o.OffhandRestore, SlotRestore = o.SlotRestore, SlayerGauntlet = o.SlayerGauntlet, Belts = o.Belts,
+                SlayerSkip = o.SlayerSkip, SlayerExtend = o.SlayerExtend, SlayerReserve = o.SlayerReserve, SlayerRerollLocked = o.SlayerRerollLocked, SlayerAlways = o.SlayerAlways, HudX = o.HudX, HudY = o.HudY, HudMin = o.HudMin,
             };
             Status = $"Loaded \"{q.Name}\"";
         });
@@ -297,26 +314,70 @@ sealed class Queue
         Changed?.Invoke();
     }
 
+    readonly List<(string Steps, string What)> _undo = new();
+
+    /// <summary>What Undo would put back, or "" when there is nothing to undo.</summary>
+    public string UndoWhat => _undo.Count == 0 ? "" : _undo[^1].What;
+
+    /// <summary>A change to the step list that Undo can take back.</summary>
+    void Change(string what, Action change)
+    {
+        _undo.Add((JsonSerializer.Serialize(State.Steps), what));
+        if (_undo.Count > 30) _undo.RemoveAt(0);
+        Edit(() => { change(); Settle(); });
+    }
+
+    public void Undo()
+    {
+        if (_undo.Count == 0) return;
+        var (json, what) = _undo[^1];
+        _undo.RemoveAt(_undo.Count - 1);
+        List<Step>? steps = null;
+        try { steps = JsonSerializer.Deserialize<List<Step>>(json); } catch { }
+        if (steps == null) return;
+        Edit(() =>
+        {
+            State.Steps = steps;
+            if (steps.Count == 0) State.Running = false;
+            foreach (Step st in steps.Where(x => x.Begun && !x.Done)) { st.Waiting = true; st.RetryAt = 0; }
+            Settle();
+            Note($"Undid: {what}");
+        });
+    }
+
+    /// <summary>After the order changes: a step that was going but is no longer first shows as paused, and starts
+    /// again properly (gear, toolbelt) when its turn comes back.</summary>
+    void Settle()
+    {
+        var current = CurrentSteps().ToHashSet();
+        foreach (Step st in State.Steps)
+        {
+            if (st.Done || current.Contains(st)) continue;
+            if (st.Begun) { st.Waiting = true; st.RetryAt = 0; st.State = "paused: a step above runs first"; }
+            else st.State = "";
+        }
+    }
+
     // ---- editing ----
 
-    public void Add(Step s) => Edit(() => State.Steps.Add(s));
-    public void AddRange(IEnumerable<Step> steps) => Edit(() => State.Steps.AddRange(steps));
+    public void Add(Step s) => Change("add a step", () => State.Steps.Add(s));
+    public void AddRange(IEnumerable<Step> steps) => Change("add steps", () => State.Steps.AddRange(steps));
 
-    public void Remove(int i) => Edit(() =>
+    public void Remove(int i) => Change("remove a step", () =>
     {
         if (i < 0 || i >= State.Steps.Count) return;
         State.Steps.RemoveAt(i);
         if (State.Steps.Count == 0) State.Running = false;
     });
 
-    public void Move(int i, int by) => Edit(() =>
+    public void Move(int i, int by) => Change("move a step", () =>
     {
         int j = i + by;
         if (i < 0 || j < 0 || i >= State.Steps.Count || j >= State.Steps.Count) return;
         (State.Steps[i], State.Steps[j]) = (State.Steps[j], State.Steps[i]);
     });
 
-    public void MoveTo(int from, int to) => Edit(() =>
+    public void MoveTo(int from, int to) => Change("move a step", () =>
     {
         if (from < 0 || from >= State.Steps.Count) return;
         Step s = State.Steps[from];
@@ -324,12 +385,12 @@ sealed class Queue
         State.Steps.Insert(Math.Clamp(to, 0, State.Steps.Count), s);
     });
 
-    public void Replace(int i, Step s) => Edit(() => { if (i >= 0 && i < State.Steps.Count) State.Steps[i] = s; });
+    public void Replace(int i, Step s) => Change("edit a step", () => { if (i >= 0 && i < State.Steps.Count) State.Steps[i] = s; });
 
     public void SetOption(Action<QueueState> set) => Edit(() => set(State));
 
 
-    public void Clear() => Edit(() => { State.Steps.Clear(); State.Running = false; State.Name = ""; Status = "Not running"; });
+    public void Clear() => Change("remove all steps", () => { State.Steps.Clear(); State.Running = false; State.Name = ""; Status = "Not running"; });
     public void SetLoop(bool on) => Edit(() => State.Loop = on);
     public void SetIdle(ActionRef? a) => Edit(() => State.Idle = a);
 
@@ -397,6 +458,10 @@ sealed class Queue
             var combat = game.Entities.GetAllObjects().OfType<GamesByMalcs.Melvor2.Entities.Combat.CombatEntity>().FirstOrDefault();
             if (combat != null)
                 combat.Enemy.Killed += (_, _) => { lock (s_performed) s_performed[combat.Id] = (s_performed.TryGetValue(combat.Id, out long n) ? n : 0) + 1; };
+            // Finished slayer tasks, for "Slayer tasks: N tasks done".
+            var tasks = Slayer.Component(game);
+            if (tasks != null)
+                tasks.TaskCompleted += (_, _) => { lock (s_performed) s_performed[Slayer.DoneKey] = (s_performed.TryGetValue(Slayer.DoneKey, out long n) ? n : 0) + 1; };
         }
         catch (Exception ex) { _log("Times goal unavailable: " + ex.Message); }
     }
@@ -425,7 +490,7 @@ sealed class Queue
                     long gp = ShopSource.Gp(game);
                     return $"{gp:N0} / {s.Amount:N0} GP";
                 }
-            case Goal.Times: return $"{(s.Begun ? Performed(s.Action.Entity) - s.StartTimes : 0):N0} / {s.Amount:N0}";
+            case Goal.Times: return $"{(s.Begun ? Performed(s.CountKey) - s.StartTimes : 0):N0} / {s.Amount:N0}";
             case Goal.Minutes:
                 if (!s.Begun) return $"{s.Amount} min";
                 double left = s.Amount - (DateTime.UtcNow - s.StartedUtc).TotalMinutes;
@@ -450,7 +515,7 @@ sealed class Queue
         Goal.BankCount => BankCount(game, s.Item) >= s.Amount,
         Goal.MoreItems => s.Begun && BankCount(game, s.Item) - s.StartCount >= s.Amount,
         Goal.Minutes => s.Begun && (DateTime.UtcNow - s.StartedUtc).TotalMinutes >= s.Amount,
-        Goal.Times => s.Begun && Performed(s.Action.Entity) - s.StartTimes >= s.Amount,
+        Goal.Times => s.Begun && Performed(s.CountKey) - s.StartTimes >= s.Amount,
         Goal.Gold => ShopSource.Gp(game) >= s.Amount,
         _ => false,
     };
@@ -458,12 +523,22 @@ sealed class Queue
     // ---- running ----
 
     bool _bankFullNoted;
+    double _nextSlayer;
 
     public void Tick(Game? game, double now)
     {
         if (game == null) { _character = ""; return; }
         Hook(game);
         if (game.CharacterName != _character) LoadFor(game.CharacterName);
+
+        // Slayer rules all the time (Options), unless a Slayer tasks step is applying them already.
+        if (State.SlayerAlways && now >= _nextSlayer && !GameAccess.IsComputingOffline
+            && !(State.Running && CurrentSteps().Any(x => x.IsSlayer)))
+        {
+            _nextSlayer = now + 5;
+            try { string did = Slayer.ApplyRules(game, State); if (did.Length > 0) Note("Slayer: " + did); } catch { }
+        }
+
         if (!State.Running || now < _nextCheck) return;
         _nextCheck = now + 0.5;
 
@@ -499,7 +574,7 @@ sealed class Queue
 
     /// <summary>"Woodcutting: Mahogany Tree", or for a train-a-skill step "Train Woodcutting (Mahogany Tree)".</summary>
     public static string Label(Step s) =>
-        s.IsBest ? s.Resolved != null ? $"{s.Action.Label} ({s.Resolved.Label[(s.Resolved.Label.IndexOf(':') + 1)..].Trim()})" : s.Action.Label : s.Action.Label;
+        s.IsBest || s.IsSlayer ? s.Resolved != null ? $"{s.Action.Label} ({s.Resolved.Label[(s.Resolved.Label.IndexOf(':') + 1)..].Trim()})" : s.Action.Label : s.Action.Label;
 
     void WearIdle(Game game)
     {
@@ -542,8 +617,31 @@ sealed class Queue
         if (!s.Begun && s.Goal is Goal.Level or Goal.BankCount or Goal.Gold && Reached(game, s))
             return Done(s, $"{s.Action.Label}: goal already met", "skipped");
 
-        // Train a skill: every 10 seconds, look for a better action than the one running (new unlocks as you level).
         bool switched = false;
+        // Slayer tasks: every few seconds apply the reroll/extend rules and fight the top task (a finished task moves on).
+        if (s.IsSlayer && now >= s.BestCheckAt)
+        {
+            s.BestCheckAt = now + 3;
+            string did = Slayer.ApplyRules(game, State);
+            if (did.Length > 0) Note("Slayer: " + did);
+            ActionRef? top = Slayer.Pick(game, State, s.FailedUntil, now);
+            if (top != null && (s.Resolved == null || s.Resolved.Target != top.Target || s.Resolved.Area != top.Area))
+            {
+                if (s.Resolved != null) Note($"Slayer tasks: next, {top.Label}");
+                s.Resolved = top;
+                switched = true;
+                if (s.Begun) { s.Waiting = true; s.RetryAt = 0; }
+            }
+            if (top == null)
+            {
+                if (s.Resolved != null) Starter.Component(game, s.Resolved)?.TryStop(true);
+                s.Resolved = null;
+                s.Waiting = true;
+                s.State = "waiting: no slayer task you can fight (locked areas or monsters you skip)";
+            }
+        }
+
+        // Train a skill: every 10 seconds, look for a better action than the one running (new unlocks as you level).
         if (s.IsBest && now >= s.BestCheckAt)
         {
             s.BestCheckAt = now + 10;
@@ -567,7 +665,7 @@ sealed class Queue
                     if (Queue.BankCount(game, it.Id) > 0) Starter.Sell(game, it.Id, 0);
         }
         ActionRef act = s.Effective;
-        if (s.IsBest && s.Resolved == null) return switched;
+        if ((s.IsBest || s.IsSlayer) && s.Resolved == null) return switched;
 
         if (!s.Begun || s.Waiting)
         {
@@ -597,6 +695,14 @@ sealed class Queue
             string why = StartIt(act);
             if (why.Length > 0)
             {
+                if (s.IsSlayer)
+                {
+                    // That task can't be fought now; try another master's task for a couple of minutes.
+                    s.FailedUntil[act.Target] = now + 120;
+                    s.Resolved = null;
+                    s.BestCheckAt = 0;
+                    if (Slayer.Pick(game, State, s.FailedUntil, now) != null) return true;
+                }
                 if (s.IsBest)
                 {
                     // That action cannot run (usually materials); try the next best one right away.
@@ -620,7 +726,7 @@ sealed class Queue
                 s.Begun = true;
                 s.StartedUtc = DateTime.UtcNow;
                 s.StartCount = Count(game, s);
-                s.StartTimes = Performed(s.Action.Entity);
+                s.StartTimes = Performed(s.CountKey);
                 Note($"Step {index + 1}: {Label(s)}, {s.GoalText()}");
             }
             s.Waiting = false;

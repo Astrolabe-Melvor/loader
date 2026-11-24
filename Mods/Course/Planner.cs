@@ -336,10 +336,13 @@ sealed class Planner
     ActionRef? ToAction(PlanData.Rate r)
     {
         string local = r.Id.Contains(':') ? r.Id[(r.Id.IndexOf(':') + 1)..] : r.Id;
+        // Most rates are "Skill:Action". Agility runs are "Agility:Course:Path": match the path, then the course.
+        var parts = local.Split(':').Select(Local).Where(x => x.Length > 0).Reverse().ToList();
         foreach (SkillChoice s in Catalog.Skills(_game))
         {
             if (Local(s.Id) != r.Skill && s.Name != r.Skill) continue;
             ActionChoice? a = s.Actions.FirstOrDefault(x => Local(x.Ref.Target) == local);
+            foreach (string p in parts) a ??= s.Actions.FirstOrDefault(x => Local(x.Ref.Target) == p);
             if (a != null) return a.Ref;
         }
         return null;

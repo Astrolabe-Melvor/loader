@@ -7,7 +7,7 @@ static class Help
 
 [b]Bank[/b]: what the whole bank and each tab sells for (with your sale bonuses). Click a tab button to show only that tab; search and filter the table.
 [b]Rules[/b]: pick an item, then [i]Keep some, sell the rest[/i] or [i]Junk: always sell all[/i], and [i]Save rule[/i]. [i]Sell by my rules now[/i] sells what the rules allow (the line beside it says what first); [i]Sell by my rules automatically[/i] does it every 10 seconds. Locked bank stacks are never sold.
-[b]Shop[/b]: every purchase the game shows you, with its cost and whether you can buy it (locked ones say what they need). Pick one to give it a rule:
+[b]Shop[/b]: every purchase the game shows you, with its cost and whether you can buy it (locked ones say what they need). Purchases with the same name (a "+25 Bank Slots" per skill) show what unlocks each. Each row is its own purchase with its own rule; a rule goes away once its upgrade is owned (or its "buy once" item bought); the tab refreshes every few seconds. Pick one to give it a rule:
   [i]Buy as soon as I can[/i] for upgrades with a buy limit (bank slots, stations, permits). [i]Rule: buy every upgrade listed[/i] adds it to every upgrade in the table, so filter by category first.
   Items with no buy limit (arena gear, arrows, buckets, charms) get [i]Buy once as soon as I can[/i] (only offered until you have bought it) or [i]Keep ... stocked[/i]: Hold buys until you have that many in the bank. Sell rules never sell below a stocked amount.
   Purchases that give no item can only be bought by hand. [i]Never spend below[/i] sets a reserve for each currency; item costs never take an item below its keep amount in Rules. Tick [i]Buy by my shop rules automatically[/i] to check every 10 seconds.

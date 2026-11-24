@@ -27,6 +27,27 @@ public sealed class KitWindow
 
     // Windows stack in the order they were last opened or clicked (canvas layers 64 and up; Godot caps them at 128).
     static readonly System.Collections.Generic.List<KitWindow> s_stack = new();
+    static readonly System.Collections.Generic.List<KitWindow> s_all = new();
+    static bool s_guard, s_wasDown;
+
+    /// <summary>A click anywhere that is not the focused text or number box takes the focus off it (cards and labels
+    /// swallow clicks, so the window frame alone can't see them).</summary>
+    static void FocusGuard()
+    {
+        bool down = Input.IsMouseButtonPressed(MouseButton.Left) || Input.IsMouseButtonPressed(MouseButton.Right);
+        bool pressed = down && !s_wasDown;
+        s_wasDown = down;
+        if (!pressed) return;
+        Viewport? vp = ((SceneTree)Engine.GetMainLoop()).Root;
+        Control? f = vp?.GuiGetFocusOwner();
+        if (f == null || f is not (LineEdit or TextEdit)) return;
+        KitWindow? w = s_all.Find(x => x._layer.Visible && x.Root.IsAncestorOf(f));
+        if (w == null) return;
+        Control? hovered = vp!.GuiGetHoveredControl();
+        // Still on the box (or its SpinBox around it): keep the focus.
+        if (hovered != null && (hovered == f || f.IsAncestorOf(hovered) || (hovered is SpinBox && hovered.IsAncestorOf(f)))) return;
+        f.ReleaseFocus();
+    }
 
     /// <summary>The window frame. Size it with CustomMinimumSize.</summary>
     public PanelContainer Root { get; }
@@ -145,6 +166,12 @@ public sealed class KitWindow
 
         _layer.Scale = Vector2.One * WindowPrefs.Scale;
         WindowPrefs.ScaleChanged += OnScale;
+        s_all.Add(this);
+        if (!s_guard)
+        {
+            s_guard = true;
+            ((SceneTree)Engine.GetMainLoop()).ProcessFrame += FocusGuard;
+        }
         ((SceneTree)Engine.GetMainLoop()).Root.AddChild(_layer);
     }
 
@@ -292,6 +319,7 @@ public sealed class KitWindow
     public void Free()
     {
         s_stack.Remove(this);
+        s_all.Remove(this);
         WindowPrefs.ScaleChanged -= OnScale;
         _layer.QueueFree();
     }

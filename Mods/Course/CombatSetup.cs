@@ -239,11 +239,11 @@ static class CombatSetup
         if (s.Weapon.Length == 0 && s.Stance.Length == 0)
         {
             // Nothing to change but the slayer gauntlet: give back any swapped weapon or offhand, then check the task.
-            var parts = new[] { RestoreWeapon(game, state), RestoreOffhand(game, state), Slayer(game, state, Enemies(game, s.Action)) };
+            var parts = new[] { RestoreWeapon(game, state), RestoreOffhand(game, state), Slayer(game, state, Enemies(game, s.Effective)) };
             return string.Join(", ", parts.Where(x => x.Length > 0));
         }
         EquipmentComponent eq = ce.Equipment;
-        List<Enemy> enemies = Enemies(game, s.Action);
+        List<Enemy> enemies = Enemies(game, s.Effective);
         var said = new List<string>();
 
         Pick? best = null;

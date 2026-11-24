@@ -194,6 +194,10 @@ sealed class HoldWindow
         sold.AddChild(_sold);
 
         _win.Opened += () => Show(_tab);
+        // GP and levels change as you play: refresh the shop tab every few seconds while it is open.
+        var timer = new Godot.Timer { WaitTime = 3, Autostart = true };
+        timer.Timeout += () => { if (_win.Visible && _tab == 1 && GameAccess.CurrentGame is Game g) RefreshShop(g); };
+        _win.Root.AddChild(timer);
         _k.Changed += () => { if (_win.Visible) Refresh(); };
     }
 
@@ -376,24 +380,36 @@ sealed class HoldWindow
         int ready = _offers.Count(o => o.State == State.Ready);
         _shopSummary.Text = $"{ready} purchases you can buy now, {_offers.Count(o => o.State == State.Locked)} still locked. {_k.Book.Buy.Count} shop rules.";
 
-        // Category list, keeping the current pick.
-        string cat = _shopCat.ItemCount > 0 ? _shopCat.GetItemText(_shopCat.Selected) : "All categories";
-        _shopCat.Clear();
-        _shopCat.AddItem("All categories");
-        foreach (string c in _offers.Select(o => o.Category).Distinct()) _shopCat.AddItem(c);
-        for (int i = 0; i < _shopCat.ItemCount; i++) if (_shopCat.GetItemText(i) == cat) _shopCat.Select(i);
-
-        // Reserves: one box per currency you hold.
-        foreach (Node n in _reserves.GetChildren()) { _reserves.RemoveChild(n); n.QueueFree(); }
-        _reserves.AddChild(Kit.Label("Never spend below:", null, 13));
-        foreach (Currency c in Shopper.Currencies(game))
+        // Category list, keeping the current pick; rebuilt only when the categories change (an open list stays open).
+        var cats = _offers.Select(o => o.Category).Distinct().ToList();
+        if (!cats.SequenceEqual(_cats))
         {
-            string id = c.Id;
-            var box = Kit.Spin(new SpinBox { MinValue = 0, MaxValue = 1e15, Value = _k.Shop.Reserve(id), CustomMinimumSize = new Vector2(150, 0) });
-            box.Suffix = id == Shopper.Gold ? "GP" : c.DisplayNameShort.ToString();
-            box.TooltipText = $"Shop rules never take your {c.DisplayName} below this. Item costs never go below the item's keep amount in Rules.";
-            box.ValueChanged += v => _k.SetReserve(id, (long)v);
-            _reserves.AddChild(box);
+            _cats = cats;
+            string cat = _shopCat.ItemCount > 0 ? _shopCat.GetItemText(_shopCat.Selected) : "All categories";
+            _shopCat.Clear();
+            _shopCat.AddItem("All categories");
+            foreach (string c in cats) _shopCat.AddItem(c);
+            for (int i = 0; i < _shopCat.ItemCount; i++) if (_shopCat.GetItemText(i) == cat) _shopCat.Select(i);
+        }
+
+        // Reserves: one box per currency you hold; rebuilt only when that set changes, so typing is never cut off.
+        if (_reserveFor != _k.Character) { _reserveFor = _k.Character; _reserveKey = ""; }
+        var currencies = Shopper.Currencies(game);
+        string key = string.Join("|", currencies.Select(c => c.Id));
+        if (key != _reserveKey)
+        {
+            _reserveKey = key;
+            foreach (Node n in _reserves.GetChildren()) { _reserves.RemoveChild(n); n.QueueFree(); }
+            _reserves.AddChild(Kit.Label("Never spend below:", null, 13));
+            foreach (Currency c in currencies)
+            {
+                string id = c.Id;
+                var box = Kit.Spin(new SpinBox { MinValue = 0, MaxValue = 1e15, Value = _k.Shop.Reserve(id), CustomMinimumSize = new Vector2(150, 0) });
+                box.Suffix = id == Shopper.Gold ? "GP" : c.DisplayNameShort.ToString();
+                box.TooltipText = $"Shop rules never take your {c.DisplayName} below this. Item costs never go below the item's keep amount in Rules.";
+                box.ValueChanged += v => _k.SetReserve(id, (long)v);
+                _reserves.AddChild(box);
+            }
         }
 
         var (due, waiting) = _k.Shop.Plan(game);
@@ -425,32 +441,32 @@ sealed class HoldWindow
         };
     }
 
+    List<string> _shownIds = new();
+    List<string> _cats = new();
+    string _reserveKey = "", _reserveFor = "";
+
     void FillShop()
     {
-        _shop.Clear();
-        TreeItem root = _shop.CreateItem();
         var shown = ShownOffers().ToList();
         var order = _k.RuleOrder();
         if (_shopShow.Selected == 5 && _k.Book.MyOrder) shown = shown.OrderBy(o => order.IndexOf(o.P.Id)).ToList();
+        var ids = shown.Select(o => o.P.Id).ToList();
+        UpdateShopButtons(shown);
+        // Same rows as last time (after a purchase, or the timer): update them in place, keeping the scroll position.
+        if (ids.Count > 0 && ids.SequenceEqual(_shownIds) && _shop.GetRoot() is TreeItem existing)
+        {
+            int n = 0;
+            for (TreeItem? t = existing.GetFirstChild(); t != null && n < shown.Count; t = t.GetNext(), n++) SetShopRow(t, shown[n], order);
+            SelectOffer(_offer);
+            return;
+        }
+        _shownIds = ids;
+        _shop.Clear();
+        TreeItem root = _shop.CreateItem();
         foreach (Offer o in shown)
         {
             TreeItem t = _shop.CreateItem(root);
-            t.SetMetadata(0, o.P.Id);
-            t.SetText(0, o.Name);
-            // Some purchases have no icon of their own; the item they give always does.
-            t.SetIcon(0, Kit.Icon(o.Gives?.Icon ?? o.P.Icon, 18));
-            t.SetText(1, o.Section.Length > 0 ? $"{o.Category}: {o.Section}" : o.Category);
-            t.SetTooltipText(1, t.GetText(1));
-            t.SetCustomColor(1, Kit.Dim);
-            t.SetText(2, o.State == State.Owned ? "" : o.Cost);
-            t.SetText(3, o.Note);
-            t.SetTooltipText(3, o.Note);
-            t.SetCustomColor(3, o.State switch { State.Ready => Kit.Good, State.Short => Kit.Gold, _ => Kit.Dim });
-            if (_k.Book.Buy.TryGetValue(o.P.Id, out BuyRule? r))
-            {
-                t.SetText(4, (_k.Book.MyOrder ? $"#{order.IndexOf(o.P.Id) + 1} " : "") + RuleText(r, o));
-                t.SetCustomColor(4, Kit.Link);
-            }
+            SetShopRow(t, o, order);
             if (o.P.Id == _offer) t.Select(0);
         }
         if (shown.Count == 0)
@@ -459,10 +475,35 @@ sealed class HoldWindow
             t.SetText(0, _shopShow.Selected == 0 ? "Nothing you can buy right now." : "Nothing matches.");
             t.SetCustomColor(0, Kit.Dim);
         }
-        _ruleAll.Disabled = !shown.Any(o => o.Kind == Kind.Upgrade && o.State != State.Owned && !_k.Book.Buy.ContainsKey(o.P.Id));
         // Keep the pick only while it is in the table, so the buttons never act on a row you cannot see.
         SelectOffer(shown.Any(o => o.P.Id == _offer) ? _offer : null);
     }
+
+    void SetShopRow(TreeItem t, Offer o, List<string> order)
+    {
+        t.SetMetadata(0, o.P.Id);
+        t.SetText(0, o.Name);
+        t.SetTooltipText(0, o.Name);
+        // Some purchases have no icon of their own; the item they give always does.
+        t.SetIcon(0, Kit.Icon(o.Gives?.Icon ?? o.P.Icon, 18));
+        t.SetText(1, o.Section.Length > 0 ? $"{o.Category}: {o.Section}" : o.Category);
+        t.SetTooltipText(1, t.GetText(1));
+        t.SetCustomColor(1, Kit.Dim);
+        t.SetText(2, o.State == State.Owned ? "" : o.Cost);
+        t.SetText(3, o.Note);
+        t.SetTooltipText(3, o.Note);
+        t.SetCustomColor(3, o.State switch { State.Ready => Kit.Good, State.Short => Kit.Gold, _ => Kit.Dim });
+        if (_k.Book.Buy.TryGetValue(o.P.Id, out BuyRule? r))
+        {
+            t.SetText(4, (_k.Book.MyOrder ? $"#{order.IndexOf(o.P.Id) + 1} " : "") + RuleText(r, o));
+            t.SetTooltipText(4, t.GetText(4));
+            t.SetCustomColor(4, Kit.Link);
+        }
+        else t.SetText(4, "");
+    }
+
+    void UpdateShopButtons(List<Offer> shown) =>
+        _ruleAll.Disabled = !shown.Any(o => o.Kind == Kind.Upgrade && o.State != State.Owned && !_k.Book.Buy.ContainsKey(o.P.Id));
 
     void SelectOffer(string? id)
     {

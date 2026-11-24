@@ -108,6 +108,8 @@ static class ShareCode
 
             if (target == Starter.BestTarget)
                 step.Action = new ActionRef { Entity = skill.Id, Target = Starter.BestTarget, Label = $"Train {skill.Name}" };
+            else if (target == Slayer.Target)
+                step.Action = new ActionRef { Entity = skill.Id, Target = Slayer.Target, Label = "Slayer tasks" };
             else if (target == Starter.GoldTarget)
                 step.Action = new ActionRef { Entity = skill.Id, Target = Starter.GoldTarget, Label = $"Most GP: {skill.Name}" };
             else

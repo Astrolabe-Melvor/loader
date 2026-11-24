@@ -76,6 +76,17 @@ public sealed class Shopper
     /// <summary>The game's requirement text without its BBCode and inline icons.</summary>
     static string Plain(string s) => s_space.Replace(s_tags.Replace(s_images.Replace(s, ""), ""), " ").Trim();
 
+    /// <summary>All of a purchase's requirements, met or not ("Woodcutting Level 50"), to tell look-alikes apart.</summary>
+    public static string AllNeeds(ShopPurchase p)
+    {
+        var parts = new List<string>();
+        foreach (Condition c in p.Requirements.Conditions)
+        {
+            try { parts.Add(Plain(c.GetDescription(false, false))); } catch { }
+        }
+        return string.Join(", ", parts.Where(x => x.Length > 0).Take(2));
+    }
+
     /// <summary>The unmet requirements, in the game's own words.</summary>
     public static string Needs(ShopPurchase p)
     {
@@ -132,10 +143,14 @@ public sealed class Shopper
         var list = new List<Offer>();
         ShopComponent? shop = Shop(game);
         if (shop == null) return list;
+        // Several purchases share a name (a "+25 Bank Slots" per skill): name those by what unlocks them.
+        var dupes = shop.Config.Purchases.Where(Visible).GroupBy(p => p.DisplayName.ToString()).Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet();
         foreach (ShopPurchase p in shop.Config.Purchases)
         {
             if (!Visible(p)) continue;
             Kind kind = KindOf(p);
+            string name = p.DisplayName.ToString();
+            if (dupes.Contains(name) && AllNeeds(p) is { Length: > 0 } needs) name += $" ({needs})";
             ItemQuantity? gives = p.Provides.Items.FirstOrDefault();
             State state; string note;
             if (shop.IsPurchased(p)) { state = State.Owned; note = "Owned"; }
@@ -146,7 +161,7 @@ public sealed class Shopper
             if (kind == Kind.Item && gives != null) note += $". You have {Num(shop.Inventory.GetQuantity(gives.Item))}";
             if (kind == Kind.Upgrade && p.DefaultBuyLimit > 1) note += $" ({times} of {p.DefaultBuyLimit})";
             string cat = p.Category.DisplayName.ToString(), sub = p.Subcategory.DisplayName.ToString();
-            list.Add(new Offer(p, p.DisplayName.ToString(), cat, sub.Length > 0 && sub != cat ? sub : "", kind, gives?.Item, gives?.Quantity ?? 0, state, note, CostText(p), times));
+            list.Add(new Offer(p, name, cat, sub.Length > 0 && sub != cat ? sub : "", kind, gives?.Item, gives?.Quantity ?? 0, state, note, CostText(p), times));
         }
         return list;
     }
@@ -221,6 +236,19 @@ public sealed class Shopper
 
     public List<(ShopPurchase P, int Qty)> Due(Game game) => Plan(game).Buy;
 
+    /// <summary>Drops rules that are done: an upgrade now owned, or a "buy once" item already bought.
+    /// Returns true when any rule went.</summary>
+    public bool PruneDone(Game game)
+    {
+        ShopComponent? shop = Shop(game);
+        if (shop == null || _k.Book.Buy.Count == 0) return false;
+        var done = shop.Config.Purchases
+            .Where(p => _k.Book.Buy.TryGetValue(p.Id, out BuyRule? r) && (shop.IsPurchased(p) || (r.Once && shop.GetUpgradesPurchased(p) > 0)))
+            .Select(p => p.Id).ToList();
+        foreach (string id in done) { _k.Book.Buy.Remove(id); _k.Book.BuyOrder.Remove(id); }
+        return done.Count > 0;
+    }
+
     public (int Bought, string Text) BuyByRules(Game game, bool auto, double now = 0)
     {
         var names = new List<string>();
@@ -240,15 +268,15 @@ public sealed class Shopper
             }
             else if (auto) _backoff[p.Id] = now + 300;
         }
-        if (names.Count > 0) _k.Commit();
+        if (PruneDone(game) || names.Count > 0) _k.Commit();
         return (names.Count, string.Join(", ", names));
     }
 
     readonly HashSet<string> _unlocked = new();
     string _seenFor = "";
 
-    /// <summary>Tells Beacon (over the message bus) when a purchase you have a rule for becomes buyable.
-    /// The first look at a character only learns what is already unlocked.</summary>
+    /// <summary>Tells Beacon (over the message bus) when a purchase you have a rule for goes from locked to buyable.
+    /// Every purchase's state is tracked, so adding a rule to one that is already open says nothing.</summary>
     public void WatchUnlocks(Game game)
     {
         ShopComponent? shop = Shop(game);
@@ -257,8 +285,10 @@ public sealed class Shopper
         if (first) { _unlocked.Clear(); _seenFor = _k.Character; }
         foreach (ShopPurchase p in shop.Config.Purchases)
         {
-            if (!_k.Book.Buy.ContainsKey(p.Id) || shop.IsPurchased(p) || !Visible(p) || !Unlocked(p)) continue;
-            if (_unlocked.Add(p.Id) && !first) Messages.Publish("hold.unlocked", $"{p.DisplayName} is unlocked in the shop ({CostText(p)})");
+            bool open = !shop.IsPurchased(p) && Visible(p) && Unlocked(p);
+            if (!open) { _unlocked.Remove(p.Id); continue; }
+            if (_unlocked.Add(p.Id) && !first && _k.Book.Buy.ContainsKey(p.Id))
+                Messages.Publish("hold.unlocked", $"{p.DisplayName} is unlocked in the shop ({CostText(p)})");
         }
     }
 
@@ -281,6 +311,7 @@ public sealed class Shopper
                 InventoryWalletTransactionResult.RequirementsNotMet => Needs(p),
                 _ => "The game refused the purchase.",
             };
+        PruneDone(game);
         _k.Book.Bought.Insert(0, new Bought { Time = DateTime.Now, Purchase = p.Id, Name = p.DisplayName.ToString(), Qty = qty, Cost = cost, Gp = gp, Auto = auto });
         if (_k.Book.Bought.Count > 500) _k.Book.Bought.RemoveRange(500, _k.Book.Bought.Count - 500);
         if (!auto) _k.Commit();

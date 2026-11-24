@@ -73,7 +73,7 @@ public sealed class Keeper
         if (game.CharacterName != _character) Load(game.CharacterName);
         if (GameAccess.IsComputingOffline || now < _nextAuto) return;
         _nextAuto = now + 10;
-        try { Shop.WatchUnlocks(game); } catch { }
+        try { Shop.WatchUnlocks(game); if (Shop.PruneDone(game)) Commit(); } catch { }
         if (Book.Auto)
         {
             var (count, gp) = SellByRules(game, auto: true);
