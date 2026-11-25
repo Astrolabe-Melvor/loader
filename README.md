@@ -1,18 +1,32 @@
-# Astrolabe Loader
+# Astrolabe
 
-A mod loader for Melvor Idle 2, with a shared UI kit that draws mod windows using the game's own textures and fonts.
+Mods for Melvor Idle 2 that look like part of the game: queue your actions, see what your bank is worth and sell by rules, get alerts, look up any item, keep save backups. Unofficial; no game files are changed.
 
-Tested on game version 0.11.7.
+Tested on game version 0.11.7 (Steam, Windows).
 
-## Install (from source)
+## Download
 
-Needs the [.NET 10 SDK](https://dotnet.microsoft.com/download). Close the game, then run `Install.cmd`.
+**[Latest release](https://github.com/Astrolabe-Melvor/loader/releases/latest)**, or the [Mods page on the Astrolabe wiki](https://astrolabe-melvor.github.io/#/mods), which has the same files with a short description of each.
 
-It builds the loader into the game folder, writes `override.cfg` next to `Melvor2.exe`, and builds every mod under `Mods\`. If the game is not at `F:\SteamLibrary\steamapps\common\Melvor Idle 2`, set `MI2_GAME_DIR` first.
+1. Close the game.
+2. Open the game folder: Steam > right-click Melvor Idle 2 > Manage > Browse local files.
+3. Extract `AstrolabeAll-<version>.zip` there, so `override.cfg` sits next to `Melvor2.exe`. (Or the Loader zip plus only the mods you want.)
+4. Start the game. A green Astrolabe tag shows top left, **F1** opens the Mods menu, and every mod window has Help and a Tour.
 
-Start the game. A green tag in the top-left confirms the loader, and **F1** opens the Mods menu.
+To update, close the game and extract the new zips over the old ones; your settings are kept. The Mods menu says when there is an update.
+To remove, delete `override.cfg` and the folder `data_MelvorModLoader_windows_x86_64`. The `mods` folder can stay.
 
-`Uninstall.cmd` removes `override.cfg` and the loader folder. The game then runs untouched.
+| Mod | Key | What it does |
+|---|---|---|
+| Course | F6 | Queue actions one after another, each until a goal: a level, an amount, a time. Plans whole items, runs slayer tasks, puts on each step's gear. |
+| Logbook | F7 | XP, items and gold this session, per hour, with rare drops and past sessions. |
+| Beacon | F8 | A sound, a note, a taskbar flash or a Discord message when something needs you. |
+| Hold | F9 | What your bank is worth, sell by rules, a cleanup list of what's safe to sell, and shop buying by rules. |
+| Spyglass | F10 | Where any item comes from and what it is for; plan it in Course. |
+| Anchor | F4 | Save backups on a timer, with notes; restore from inside the game. |
+| Deckhand | F3 | Ranching petting and repairs, the grain mill kept running, farming warnings. |
+
+Found a bug? F1 > **Report a bug** copies everything needed; paste it into [a new issue](https://github.com/Astrolabe-Melvor/loader/issues/new).
 
 ## The Mods menu (F1)
 
@@ -24,6 +38,16 @@ Start the game. A green tag in the top-left confirms the loader, and **F1** open
 After a game update the loader says so in its top-left tag, checks every mod for game calls that no longer exist, and tells mods that cache game data to refresh.
 
 Every mod window has **Help** and a **Tour** in its title bar. The tour points at each part of the window in turn; until you've opened and closed a window once, its Tour button is green and says "Take the tour". Windows remember where you drag them and how big you make them. When a window is taller than the screen, its tables get shorter first, so you scroll the table, not the window.
+
+## Building from source
+
+Needs the [.NET 10 SDK](https://dotnet.microsoft.com/download). Close the game, then run `Install.cmd`.
+
+It builds the loader into the game folder, writes `override.cfg` next to `Melvor2.exe`, and builds every mod under `Mods\`. If the game is not at `F:\SteamLibrary\steamapps\common\Melvor Idle 2`, set `MI2_GAME_DIR` first.
+
+Start the game. A green tag in the top-left confirms the loader, and **F1** opens the Mods menu.
+
+`Uninstall.cmd` removes `override.cfg` and the loader folder. The game then runs untouched.
 
 ## Releases
 
@@ -76,7 +100,7 @@ Theme variations: `Heading`, `Dim`, `ActionButton`, `Card`, `Ribbon`.
 
 ### Compatibility
 
-The `MelvorModLoader` namespace types (`IMod`, `ModContext`, `GameAccess`, `ModWindow`, `KeyChord`) keep the same names and signatures as the other Melvor Idle 2 mod loader, so mods built for it load here. Only one loader can be installed at a time.
+The `MelvorModLoader` namespace types (`IMod`, `ModContext`, `GameAccess`, `ModWindow`, `KeyChord`) keep the same names and signatures as falorfrozen's Melvor Mod Loader, so mods built for it load here too. Only one loader can be installed at a time.
 
 ## License
 
