@@ -110,7 +110,7 @@ public sealed class Tracker
     Game? _hooked;
     volatile bool _offline;
     bool _fromDisk;   // _snap came from the last save, before the game was closed
-    double _next, _lastNow, _nextSave, _nextSample;
+    double _next, _lastNow, _nextSave, _nextSample, _nextHistory;
 
     public Session Session { get; private set; } = new();
     public Options Options { get; private set; } = new();
@@ -219,6 +219,7 @@ public sealed class Tracker
             s_actions.Clear();
         }
         _snap = cur;
+        if (now >= _nextHistory) { _nextHistory = now + HistoryMinutes * 60; History(cur); }
 
         if (now >= _nextSample)
         {
@@ -258,6 +259,7 @@ public sealed class Tracker
         }
         _snap = after;
         _lastNow = now;
+        _nextHistory = 0;   // record where the time away left things
         Save();
         Changed?.Invoke();
     }
@@ -338,6 +340,37 @@ public sealed class Tracker
         double rate = RecentXpPerHour(id);
         if (x == null || x.IsAtLevelCap || rate <= 0) return null;
         return x.XpToNextLevel / rate;
+    }
+
+    // ---- long-term history ----
+
+    const int HistoryMinutes = 30;
+    static string Local(string id) => id[(id.LastIndexOf(':') + 1)..];
+
+    /// <summary>
+    /// One line per half hour of play in history\&lt;character&gt;.jsonl: XP and level per skill, currencies, and the bank's sell value.
+    /// Astrolabe Tools charts these (History) and uses them for goal estimates.
+    /// </summary>
+    void History(Snapshot s)
+    {
+        if (Session.Character.Length == 0) return;
+        try
+        {
+            long bank = s.Items.Sum(kv => Session.Values.TryGetValue(kv.Key, out long v) ? v * kv.Value : 0);
+            var line = new Dictionary<string, object>
+            {
+                ["t"] = DateTime.UtcNow.ToString("o"),
+                ["xp"] = s.Xp.ToDictionary(kv => Local(kv.Key), kv => Math.Round(kv.Value)),
+                ["lv"] = s.Levels.ToDictionary(kv => Local(kv.Key), kv => kv.Value),
+                ["cur"] = s.Currency.ToDictionary(kv => Local(kv.Key), kv => kv.Value),
+                ["bank"] = bank,
+                ["items"] = s.Items.Values.Sum(),
+            };
+            string dir = Path.Combine(_folder, "history");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, Safe(Session.Character) + ".jsonl"), JsonSerializer.Serialize(line) + "\n");
+        }
+        catch (Exception e) { _log("History: " + e.Message); }
     }
 
     // ---- sessions on disk ----

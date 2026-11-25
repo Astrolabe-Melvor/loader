@@ -10,6 +10,7 @@ public sealed class CourseMod : IMod
     Queue? _queue;
     QueueWindow? _window;
     QueueHud? _hud;
+    Inbox? _inbox;
     ModWindow? _entry;
 
     public void OnLoad(ModContext ctx)
@@ -17,6 +18,7 @@ public sealed class CourseMod : IMod
         Messages.Subscribe("course.plan", OnPlan);
         MoveOldData(ctx);
         _queue = new Queue(ctx.Directory, ctx.Log);
+        _inbox = new Inbox(ctx.Directory, _queue, ctx.Log);
         _entry = ctx.AddWindow("Course", Toggle, Key.F6);
         _entry.Changed += () => _window?.SetKeyLabel(_entry.KeyLabel);
 
@@ -29,6 +31,7 @@ public sealed class CourseMod : IMod
             double now = Time.GetTicksMsec() / 1000.0;
             var game = GameAccess.CurrentGame;
             _queue.Tick(game, now);
+            _inbox.Tick(game, now);
             _window?.Tick();
             _hud.Update(game);
         };

@@ -29,7 +29,7 @@ Skill steps can put on a toolbelt set (Toolbelts tab). Toolbelt items an action 
 Make named sets of toolbelt items per skill. A consumable with "get up to" set is refilled when it runs out: from the bank, or by making or gathering more first, then the step carries on.
 
 [b]Saved and shared[/b]
-Save queues by name, or copy one as a code (CRS1:...) to share. The wiki's planner makes the same codes.
+Save queues by name, or copy one as a code (CRS1:...) to share. The wiki's planner makes the same codes, and "Send to Course" in Astrolabe Tools adds its steps to this queue on its own.
 
 [b]While it runs[/b]
 The small panel shows the current step: drag it anywhere, "–" folds it, click it to open Course. History lists everything the queue did. [i]When the queue waits or ends[/i] sets an action to do meanwhile.

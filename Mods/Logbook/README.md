@@ -9,6 +9,10 @@ What you gained this session and how fast. Built on Astrolabe Loader. **F7** ope
 - **Past sessions:** the last 60 sessions with their XP, levels, currencies, top items and rare drops.
 - **Options:** the panel, and putting it back in its first spot.
 
+## History
+
+Every half hour of play (and right after time away) Logbook adds a line to `history\<character>.jsonl`: XP and level per skill, currencies and your bank's sell value. Astrolabe Tools charts it under History and uses it to estimate goals at your real pace.
+
 ## Time away
 
 Offline progress is not counted in the per-hour rates. When the game catches up on time you were away, including after loading the game, what changed shows on its own as **Last time away**.

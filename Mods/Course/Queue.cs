@@ -223,7 +223,7 @@ sealed class Queue
         catch { }
     }
 
-    void Raise(string text)
+    public void Raise(string text)
     {
         Note(text);
         if (State.Alerts) Alert?.Invoke(text);
