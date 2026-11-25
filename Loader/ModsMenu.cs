@@ -47,17 +47,11 @@ static class ModsMenu
         report.TooltipText = "Puts together your versions, mods and the log, so a bug can be found and fixed.";
         HBoxContainer updateRow = Kit.Row(Kit.Label("Updates:", null, 0, "Dim"), s_update, s_release, now, auto, report);
         s_win.Body.AddChild(updateRow);
-        Updates.Changed += () => { if (s_win.Visible) { RefreshUpdate(); RebuildStatus(); } };
+        Updates.Changed += () => { if (s_win.Visible) Rebuild(); };
 
-        var scroll = new ScrollContainer
-        {
-            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
-            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
-            CustomMinimumSize = new Vector2(0, 260),
-        };
+        // No scroll box of its own: the window grows to fit every mod, and only scrolls when the screen is too small.
         s_list = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-        scroll.AddChild(s_list);
-        s_win.Body.AddChild(scroll);
+        s_win.Body.AddChild(s_list);
 
         s_menuKey = KeyButton(() => Hotkeys.MenuKey.ToString(), k => { if (!k.IsNone) Hotkeys.SetMenuKey(k); });
         s_win.Body.AddChild(Kit.Row(
@@ -79,9 +73,9 @@ static class ModsMenu
 
         s_win.SetTour(
             new TourStep("Astrolabe", "This menu lists every mod, its window and its key. Each mod window has its own Help and Tour in its title bar."),
-            new TourStep("Your mods", "Each mod's version and whether it is working. If one says something other than ok, hover it for details, and [b]Report[/b] sends them to be fixed.", () => s_status),
+
             new TourStep("Updates", "Once a day the loader checks for newer versions. When there are some, [b]Get updates[/b] opens the download page. [b]Report a bug[/b] copies everything needed to find a problem.", () => updateRow),
-            new TourStep("Windows and keys", "Click a mod's name to open its window. Click its key to change it (press the new key, Esc cancels); [b]Off[/b] removes it.", () => scroll),
+            new TourStep("Your mods", "One line per mod. Click its name to open it, and its key to change the key (press the new key, Esc cancels); [b]Off[/b] takes the key away. If a mod has a problem it says so in red or gold beside the version; hover for details, and [b]Report[/b] sends them to be fixed.", () => s_list),
             new TourStep("This menu's key", "Change the key that opens this menu, open the log or the mods folder.", () => s_menuKey.GetParent() as Control));
 
         s_win.Opened += Rebuild;
@@ -102,75 +96,95 @@ static class ModsMenu
         s_release.Visible = Updates.Newer.Count > 0;
     }
 
-    static void RebuildStatus()
-    {
-        foreach (Node n in s_status.GetChildren()) n.QueueFree();
-        foreach (string line in Loader.Notices().Where(l => l.StartsWith("The game updated")))
-            s_status.AddChild(Kit.Label(line + " If something stopped working, Report a bug says which mod.", Kit.Gold, 13));
-        foreach (ModInfo m in Loader.Mods.OrderBy(m => m.Name))
-        {
-            (string state, Color color, string detail) =
-                m.Failed.Length > 0 ? ("did not load", Kit.Bad, m.Failed)
-                : m.Stopped ? ("paused after repeated errors", Kit.Bad, m.LastError)
-                : m.Missing.Count > 0 ? ($"{m.Missing.Count} game feature(s) gone in this game version", Kit.Gold, "Not found: " + string.Join("\n", m.Missing.Take(20)))
-                : m.Errors > 0 ? ($"{m.Errors} error(s) this session", Kit.Gold, m.LastError)
-                : ("ok", Kit.Good, "");
-            var newer = Updates.Newer.FirstOrDefault(n => n.Name == m.Name);
-            var row = Kit.Row(Kit.Label(m.Name, Kit.Parchment, 14), Kit.Label(m.Version, null, 13, "Dim"));
-            Label st = Kit.Label(state, color, 13);
-            if (detail.Length > 0) { st.TooltipText = detail; st.MouseFilter = Control.MouseFilterEnum.Pass; }
-            row.AddChild(st);
-            if (newer.Name != null) row.AddChild(Kit.Label($"{newer.Latest} out", Kit.Link, 13));
-            row.AddChild(Kit.Spacer());
-            if (state != "ok")
-            {
-                string name = m.Name;
-                row.AddChild(Kit.Btn("Report", () => BugReport.Open(name)));
-            }
-            s_status.AddChild(row);
-        }
-    }
+    /// <summary>How a mod is doing: a short word, its colour, and the details for the tooltip. "" when all is well.</summary>
+    static (string State, Color Color, string Detail) Health(ModInfo m) =>
+        m.Failed.Length > 0 ? ("did not load", Kit.Bad, m.Failed)
+        : m.Stopped ? ("paused after repeated errors", Kit.Bad, m.LastError)
+        : m.Missing.Any(x => x.StartsWith("newer loader")) ? ("needs a newer loader", Kit.Gold, "Not found: " + string.Join("\n", m.Missing.Take(20)))
+        : m.Missing.Count > 0 ? ($"{m.Missing.Count} game feature(s) gone in this game version", Kit.Gold, "Not found: " + string.Join("\n", m.Missing.Take(20)))
+        : m.Errors > 0 ? ($"{m.Errors} error(s) this session", Kit.Gold, m.LastError)
+        : ("", Kit.Good, "");
 
+    // One card per mod: its window buttons with their keys, the version, and anything wrong with it.
     static void Rebuild()
     {
         s_win.Subtitle = $"{Loader.Name} {Loader.Version}   game {GameWatch.Version}";
         RefreshUpdate();
-        RebuildStatus();
         s_win.CloseText = Hotkeys.MenuKey.IsNone ? "Close" : $"Close ({Hotkeys.MenuKey})";
         s_menuKey.Text = Hotkeys.MenuKey.ToString();
         s_loaded.Text = Loader.Mods.Count == 0
             ? "No mods found. Unzip each mod into its own folder under mods\\ (Open mods folder, below)."
-            : "Every mod window and its key. Click a key to change it; each window has Help and a Tour in its title bar.";
+            : "Click a mod to open it, or its key to change the key. Each mod window has Help and a Tour in its title bar.";
+
+        foreach (Node n in s_status.GetChildren()) n.QueueFree();
+        foreach (string line in Loader.Notices().Where(l => l.StartsWith("The game updated")))
+        {
+            Label l = Kit.Label(line + " If something stopped working, Report a bug says which mod.", Kit.Gold, 13);
+            l.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+            l.CustomMinimumSize = new Vector2(600, 0);
+            s_status.AddChild(l);
+        }
+        s_status.Visible = s_status.GetChildCount() > 0;
 
         foreach (Node n in s_list.GetChildren()) n.QueueFree();
 
-        foreach (var group in Hotkeys.Windows.GroupBy(w => w.Mod).OrderBy(g => g.Key == Loader.Name ? 1 : 0).ThenBy(g => g.Key))
+        var windows = Hotkeys.Windows.ToLookup(w => w.Mod);
+        var names = Loader.Mods.Select(m => m.Name).Concat(windows.Select(g => g.Key)).Distinct()
+            .OrderBy(n => n == Loader.Name ? 1 : 0).ThenBy(n => n).ToList();
+        foreach (string name in names)
         {
-            s_list.AddChild(Kit.Label(group.Key, Kit.Parchment, 15, "Heading"));
-            foreach (ModWindow w in group)
+            // The loader's own Theme preview is for mod makers: listed only with a file named "dev" in the mods folder.
+            if (name == Loader.Name && !System.IO.File.Exists(System.IO.Path.Combine(Startup.ModsFolder, "dev"))) continue;
+            ModInfo? info = Loader.Mods.FirstOrDefault(m => m.Name == name);
+            var card = new PanelContainer { ThemeTypeVariation = "Card" };
+            var col = new VBoxContainer();
+            card.AddChild(col);
+
+            // Version, update and health go on the first line.
+            var about = new HBoxContainer();
+            if (info != null) about.AddChild(Kit.Label(info.Version, null, 13, "Dim"));
+            else if (name == Loader.Name) about.AddChild(Kit.Label(Loader.Version, null, 13, "Dim"));
+            var newer = Updates.Newer.FirstOrDefault(n => n.Name == (name == Loader.Name ? "Loader" : name));
+            if (newer.Name != null) about.AddChild(Kit.Label($"{newer.Latest} out", Kit.Link, 13));
+            (string State, Color Color, string Detail) h = info != null ? Health(info) : ("", Kit.Good, "");
+            if (h.State.Length > 0)
             {
-                var card = new PanelContainer { ThemeTypeVariation = "Card" };
+                Label st = Kit.Label(h.State, h.Color, 13);
+                if (h.Detail.Length > 0) { st.TooltipText = h.Detail; st.MouseFilter = Control.MouseFilterEnum.Pass; }
+                about.AddChild(st);
+                Button report = Kit.Btn("Report", () => BugReport.Open(name));
+                report.TooltipText = "Open Report a bug for this mod";
+                about.AddChild(report);
+            }
+
+            bool first = true;
+            foreach (ModWindow w in windows[name])
+            {
                 Button open = Kit.Btn(w.Title, w.Press, action: true);
                 open.CustomMinimumSize = new Vector2(220, 0);
                 open.Alignment = HorizontalAlignment.Left;
-
                 ModWindow win = w;
                 Button key = KeyButton(() => win.KeyLabel.Length > 0 ? win.KeyLabel : "No key", k => Hotkeys.Rebind(win, k));
                 Button off = Kit.Btn("Off", () => Hotkeys.Rebind(win, KeyChord.None));
                 off.Disabled = w.Key.IsNone;
+                off.TooltipText = "Take the key off this window";
 
-                var row = Kit.Row(open, Kit.Spacer());
+                var row = Kit.Row(open);
+                if (first) { row.AddChild(about); first = false; }
+                row.AddChild(Kit.Spacer());
                 string clash = string.Join(", ", Hotkeys.Clashes(w).Select(o => o.Title));
                 if (clash.Length > 0) row.AddChild(Kit.Label("same key as " + clash, Kit.Gold, 13));
                 row.AddChild(key);
                 row.AddChild(off);
-                card.AddChild(row);
-                s_list.AddChild(card);
+                col.AddChild(row);
             }
+            // A mod with no window (or one that didn't load): its name, then the rest.
+            if (first) col.AddChild(Kit.Row(Kit.Label(name, Kit.Parchment, 15), about));
+            s_list.AddChild(card);
         }
 
-        if (Hotkeys.Windows.Count == 0)
-            s_list.AddChild(Kit.Label("No mod has a window yet.", null, 0, "Dim"));
+        if (names.Count == 0)
+            s_list.AddChild(Kit.Label("No mods yet.", null, 0, "Dim"));
     }
 
     // A button that, when clicked, waits for the next key press (with Ctrl/Shift/Alt) and hands it over. Esc cancels.

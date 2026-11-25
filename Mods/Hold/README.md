@@ -17,6 +17,16 @@ Pick an item, then:
 
 **Sell by my rules now** sells everything the rules allow; the line beside it says what that would be first. **Sell by my rules automatically** does it every 10 seconds while you play. **Locked bank stacks are never sold**, rule or not. **Sell all now** sells one item outright.
 
+## Cleanup
+
+What in your bank is safe to sell, the same list as Astrolabe Tools' Bank cleanup:
+
+- **Spare:** copies of gear beyond what you can wear (one, or two rings).
+- **Outgrown:** gear another piece you own, in the bank or worn, beats on every stat.
+- **Unused:** items nothing in the game needs.
+
+Gear that is also an ingredient or upgrade material, gear with bonuses or in a set, and locked stacks are never listed. Tick items, then **Sell** them now or **Give ticked a rule** so your rules sell them from now on. What each item is for comes from Astrolabe Tools when it runs on this PC, else the wiki's `cleanup.json`, refreshed daily and after a game update.
+
 ## Shop
 
 Every purchase the game shows you, with cost and status: owned, ready, can't afford, or locked (with what it needs, in the game's words). Filter by category, ready to buy, never bought, upgrades, items, purchases with a rule, or bought before.

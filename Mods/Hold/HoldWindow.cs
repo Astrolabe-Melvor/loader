@@ -14,8 +14,14 @@ sealed class HoldWindow
 {
     readonly Keeper _k;
     readonly KitWindow _win;
-    readonly Button[] _tabButtons = new Button[3];
-    readonly Control[] _panels = new Control[3];
+    readonly Button[] _tabButtons = new Button[4];
+    readonly Control[] _panels = new Control[4];
+
+    // cleanup
+    readonly Label _cleanSummary, _cleanMsg;
+    readonly Tree _clean;
+    readonly HashSet<string> _cleanTicked = new();
+    List<CleanRow> _cleanRows = new();
     int _tab;
 
     readonly Label _summary, _due, _ruleFor, _soldTotal;
@@ -50,7 +56,7 @@ sealed class HoldWindow
         _win.SetHelp(Help.Text);
 
         var tabRow = new HBoxContainer();
-        string[] names = { "Bank", "Shop", "History" };
+        string[] names = { "Bank", "Shop", "History", "Cleanup" };
         for (int i = 0; i < names.Length; i++)
         {
             int at = i;
@@ -59,6 +65,8 @@ sealed class HoldWindow
             _tabButtons[i].ToggleMode = true;
             tabRow.AddChild(_tabButtons[i]);
         }
+        tabRow.MoveChild(_tabButtons[3], 1);   // Cleanup sits next to Bank
+        _tabButtons[3].TooltipText = "What in your bank is safe to sell: spare gear, gear you've outgrown, and items nothing uses";
         _win.Body.AddChild(tabRow);
 
         // ---- bank ----
@@ -154,6 +162,7 @@ sealed class HoldWindow
         shop.AddChild(Kit.Row(_offerFor, _buyRule, _buyKeep, _saveBuy, _up, _down, Kit.Spacer(), _buyQty, _buyNow));
         _buyMsg = Kit.Label("", null, 13, "Dim");
         shop.AddChild(_buyMsg);
+        _buyMsg.Visible = false;   // takes no room until there's something to say
 
         _order = new OptionButton { CustomMinimumSize = new Vector2(300, 0) };
         _order.AddItem("Cheapest first");
@@ -193,10 +202,53 @@ sealed class HoldWindow
         }
         sold.AddChild(_sold);
 
+        // ---- cleanup ----
+        var clean = Panel(3);
+        _cleanSummary = Kit.Label("", null, 14);
+        _cleanSummary.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _cleanSummary.CustomMinimumSize = new Vector2(900, 0);
+        clean.AddChild(_cleanSummary);
+        _clean = new Tree { Columns = 5, ColumnTitlesVisible = true, HideRoot = true, SelectMode = Tree.SelectModeEnum.Row, CustomMinimumSize = new Vector2(0, 280), SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+        string[] ccol = { "Item", "Why", "In the bank", "Keep", "Sells for" };
+        int[] cw = { 300, 330, 100, 70, 110 };
+        for (int c = 0; c < ccol.Length; c++)
+        {
+            _clean.SetColumnTitle(c, ccol[c]);
+            _clean.SetColumnTitleAlignment(c, HorizontalAlignment.Left);
+            _clean.SetColumnCustomMinimumWidth(c, cw[c]);
+            _clean.SetColumnExpand(c, c is 0 or 1);
+        }
+        _clean.ItemEdited += () =>
+        {
+            TreeItem? it = _clean.GetEdited();
+            if (it == null || it.GetMetadata(0).VariantType == Variant.Type.Nil) return;
+            string id = it.GetMetadata(0).AsString();
+            if (it.IsChecked(0)) _cleanTicked.Add(id); else _cleanTicked.Remove(id);
+            UpdateCleanButtons();
+        };
+        clean.AddChild(_clean);
+        _cleanSell = Kit.Btn("Sell ticked", SellTicked, action: true);
+        _cleanSell.TooltipText = "Sell each ticked item down to its Keep amount, now";
+        _cleanRule = Kit.Btn("Give ticked a rule", RuleTicked);
+        _cleanRule.TooltipText = "Give each ticked item a Hold rule (keep that many, sell the rest), so Sell by my rules or the automatic sale takes care of it from now on";
+        clean.AddChild(Kit.Row(
+            WithTip(Kit.Btn("Tick all", () => { bool all = _cleanRows.All(r => _cleanTicked.Contains(r.Bank.Item.Id)); _cleanTicked.Clear(); if (!all) foreach (CleanRow r in _cleanRows) _cleanTicked.Add(r.Bank.Item.Id); FillCleanup(); }), "Tick every item, or clear the ticks"),
+            _cleanRule, _cleanRetry = Kit.Btn("Try again", () => { Cleanup.Retry(now: true); FillCleanup(); }), Kit.Spacer(), _cleanSell));
+        _cleanRetry.Visible = false;
+        _cleanMsg = Kit.Label("", null, 13, "Dim");
+        _cleanMsg.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _cleanMsg.CustomMinimumSize = new Vector2(900, 0);
+        clean.AddChild(_cleanMsg);
+        _cleanMsg.Visible = false;   // shown once there's something to say
+
         _win.Opened += () => Show(_tab);
         // GP and levels change as you play: refresh the shop tab every few seconds while it is open.
         var timer = new Godot.Timer { WaitTime = 3, Autostart = true };
-        timer.Timeout += () => { if (_win.Visible && _tab == 1 && GameAccess.CurrentGame is Game g) RefreshShop(g); };
+        timer.Timeout += () =>
+        {
+            if (_win.Visible && _tab == 1 && GameAccess.CurrentGame is Game g) RefreshShop(g);
+            if (_win.Visible && _tab == 3 && !Cleanup.Ready) FillCleanup();   // the item data is still downloading, or retrying
+        };
         _win.Root.AddChild(timer);
         _k.Changed += () => { if (_win.Visible) Refresh(); };
 
@@ -206,6 +258,7 @@ sealed class HoldWindow
             new TourStep("Your bank", "Every item, most valuable first. Search, or show only items with or without a rule. Pick a row to work on it.", () => _table, () => Show(0)),
             new TourStep("Rules", "Give the picked item a rule: keep some and sell the rest, or junk (always sell it all). [b]Sell all now[/b] sells it straight away.", () => _rule.GetParent() as Control, () => Show(0)),
             new TourStep("Selling", "[b]Sell by my rules now[/b] applies every rule once. Tick the box to do it every 10 seconds while you play. Locked bank stacks are never sold.", () => _sellRules.GetParent() as Control, () => Show(0)),
+            new TourStep("Cleanup", "What in your bank is safe to sell: spare copies of gear, gear you've outgrown, and items nothing uses. Tick them, then sell now or give them a rule.", () => _clean, () => Show(3)),
             new TourStep("The shop", "Every purchase you can see. Pick one to buy it, or give it a rule like \"buy as soon as I can\".", () => _shop, () => Show(1)),
             new TourStep("Buy order and reserves", "Which rules buy first when money is short, and how much gold or other currency to always keep back.", () => _order.GetParent() as Control, () => Show(1)),
             new TourStep("History", "Everything Hold sold or bought, and for how much.", () => _sold, () => Show(2)));
@@ -253,6 +306,7 @@ sealed class HoldWindow
         _order.Select(_k.Book.MyOrder ? 1 : 0);
         if (_tab == 1) { RefreshShop(game); return; }
         if (_tab == 2) { FillSold(); return; }
+        if (_tab == 3) { FillCleanup(); return; }
 
         _rows = _k.Rows(game);
         var (used, max) = _k.Slots(game);
@@ -556,7 +610,7 @@ sealed class HoldWindow
 
         _buyQty.Visible = o.Kind != Kind.Upgrade || o.P.DefaultBuyLimit > 1;
         if (!_buyQty.Visible) _buyQty.Value = 1;
-        _buyMsg.Text = o.State == State.Locked ? o.Note : "";
+        Say(_buyMsg, o.State == State.Locked ? o.Note : "");
         UpdateBuyButton();
     }
 
@@ -596,7 +650,7 @@ sealed class HoldWindow
             n++;
         }
         _k.Commit();
-        _buyMsg.Text = $"Added 'buy as soon as I can' to {n} upgrades.";
+        Say(_buyMsg, $"Added 'buy as soon as I can' to {n} upgrades.");
     }
 
     void Move(int by)
@@ -609,9 +663,105 @@ sealed class HoldWindow
         Offer? o = _offers.FirstOrDefault(x => x.P.Id == _offer);
         if (o == null || GameAccess.CurrentGame is not Game game) return;
         string? err = _k.Shop.Buy(game, o.P, (int)_buyQty.Value);
-        _buyMsg.Text = err ?? $"Bought {o.Name}.";
+        Say(_buyMsg, err ?? $"Bought {o.Name}.");
+    }
+
+    Button _cleanSell = null!, _cleanRule = null!, _cleanRetry = null!;
+
+    static void Say(Label l, string text) { l.Text = text; l.Visible = text.Length > 0; }
+
+    static T WithTip<T>(T c, string tip) where T : Control { c.TooltipText = tip; return c; }
+
+    void FillCleanup()
+    {
+        Game? game = GameAccess.CurrentGame;
+        _clean.Clear();
+        TreeItem root = _clean.CreateItem();
+        if (game == null) { _cleanSummary.Text = "Load a character to see the bank."; _cleanRows.Clear(); UpdateCleanButtons(); return; }
+        if (!Cleanup.Ready)
+        {
+            Cleanup.Retry(now: false);
+            _cleanSummary.Text = Cleanup.Loading ? $"Getting the item data ({Cleanup.State})..."
+                : "Couldn't get the item data. Cleanup needs Astrolabe Tools running on this PC, or the internet (it downloads cleanup.json from the wiki). It tries again every minute; Try again does it now.";
+            _cleanRetry.Visible = !Cleanup.Loading;
+            _cleanRows.Clear();
+            UpdateCleanButtons();
+            return;
+        }
+        _cleanRetry.Visible = false;
+        _cleanRows = Cleanup.Rows(game, _k.Rows(game));
+        _cleanTicked.IntersectWith(_cleanRows.Select(r => r.Bank.Item.Id));
+        _cleanSummary.Text = _cleanRows.Count == 0
+            ? "Nothing to clean up: no spare or outgrown gear, and nothing unused."
+            : $"{_cleanRows.Count} items you could sell for {Num(_cleanRows.Sum(r => r.Worth))} GP. Hover a group's name for what it means; locked stacks are never listed.";
+        string last = "";
+        foreach (CleanRow r in _cleanRows)
+        {
+            if (r.Group != last)
+            {
+                last = r.Group;
+                TreeItem head = _clean.CreateItem(root);
+                head.SetText(0, r.Group switch { "spare" => "Spare gear", "outgrown" => "Outgrown gear", _ => "Unused items" });
+                head.SetCustomColor(0, Kit.Parchment);
+                head.SetTooltipText(0, r.Group switch
+                {
+                    "spare" => "More copies than you can wear at once (one, or two rings). Keeps what you can wear.",
+                    "outgrown" => "Another piece you own, in the bank or worn, is as good or better on every stat. Gear with bonuses or in a set is never listed.",
+                    _ => "No recipe, shop, upgrade, quest or task uses it, and it does nothing by itself.",
+                });
+                head.SetSelectable(0, false);
+                for (int c = 1; c < 5; c++) head.SetSelectable(c, false);
+            }
+            TreeItem t = _clean.CreateItem(root);
+            t.SetCellMode(0, TreeItem.TreeCellMode.Check);
+            t.SetEditable(0, true);
+            t.SetChecked(0, _cleanTicked.Contains(r.Bank.Item.Id));
+            t.SetText(0, r.Bank.Name);
+            t.SetMetadata(0, r.Bank.Item.Id);
+            t.SetIcon(0, Kit.Icon(r.Bank.Item.Icon, 18));
+            string rule = RuleText(r.Bank.Item.Id);
+            t.SetText(1, r.Why + (rule.Length > 0 ? $" (rule: {rule})" : ""));
+            t.SetCustomColor(1, Kit.Dim);
+            t.SetText(2, r.Bank.Qty.ToString("N0"));
+            t.SetText(3, r.Keep.ToString("N0"));
+            t.SetText(4, Num(r.Worth));
+            t.SetCustomColor(4, Kit.Gold);
+        }
+        UpdateCleanButtons();
+    }
+
+    void UpdateCleanButtons()
+    {
+        var picked = _cleanRows.Where(r => _cleanTicked.Contains(r.Bank.Item.Id)).ToList();
+        _cleanSell.Disabled = _cleanRule.Disabled = picked.Count == 0;
+        _cleanSell.Text = picked.Count == 0 ? "Sell ticked" : $"Sell {picked.Count} for {Num(picked.Sum(r => r.Worth))} GP";
+    }
+
+    void SellTicked()
+    {
+        if (GameAccess.CurrentGame is not Game game) return;
+        int n = 0;
+        long gp = 0;
+        foreach (CleanRow r in _cleanRows.Where(r => _cleanTicked.Contains(r.Bank.Item.Id)).ToList())
+        {
+            long got = _k.Sell(game, r.Bank.Item, r.Sell);
+            if (got >= 0) { n++; gp += got; }
+        }
+        _cleanTicked.Clear();
+        _cleanMsg.Visible = true;
+        _cleanMsg.Text = n == 0 ? "Nothing was sold." : $"Sold {n} item{(n == 1 ? "" : "s")} for {Num(gp)} GP. They're in History.";
+        FillCleanup();
+    }
+
+    void RuleTicked()
+    {
+        var picked = _cleanRows.Where(r => _cleanTicked.Contains(r.Bank.Item.Id)).ToList();
+        foreach (CleanRow r in picked) _k.SetRule(r.Bank.Item.Id, r.Keep);
+        _cleanMsg.Visible = true;
+        _cleanMsg.Text = $"{picked.Count} rule{(picked.Count == 1 ? "" : "s")} saved. Sell by my rules (Bank tab) sells them; tick its box to have it done every 10 seconds.";
+        FillCleanup();
     }
 
     void Report((int Bought, string Text) r) =>
-        _buyMsg.Text = r.Bought == 0 ? "Nothing was bought." : "Bought " + r.Text + ".";
+        Say(_buyMsg, r.Bought == 0 ? "Nothing was bought." : "Bought " + r.Text + ".");
 }

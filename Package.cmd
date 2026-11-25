@@ -11,6 +11,8 @@ if not exist "%GAME%\data_GamesByMalcs.Melvor2_windows_x86_64\GamesByMalcs.Melvo
 )
 set "DIST=%~dp0dist"
 set "STAGE=%DIST%\stage"
+rem Old zips would be uploaded with the new ones; start clean.
+if exist "%DIST%\*.zip" del /q "%DIST%\*.zip"
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%"
 

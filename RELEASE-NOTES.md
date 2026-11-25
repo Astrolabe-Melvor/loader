@@ -1,34 +1,12 @@
-Extract the zips into the Melvor Idle 2 game folder (next to Melvor2.exe): the loader first, then any mods. `AstrolabeAll` has everything. Close the game first when updating.
+Extract the zips into the Melvor Idle 2 game folder (next to Melvor2.exe): the loader first, then any mods. `AstrolabeAll` has everything. Close the game first when updating; your settings are kept.
 
-## Loader 0.3.0
-- Mods menu shows each mod's version and health: loaded, did not load, paused after errors, or calling game code that a game update removed.
-- Daily update check against the newest GitHub release (only the release list is read). Get updates opens the release page.
-- Report a bug: versions, mods, errors and the end of the log in one report, copied, saved to `mods\bug-reports\`, or pasted into a GitHub issue. Your Windows user name is taken out of the log.
-- Game update check: the top-left tag says when the game updated, and mods are checked for game calls that are gone.
-- A frame handler that keeps failing is paused after 5 errors in a minute instead of erroring every frame, with a note on screen.
-- Window tours: a Tour button in every mod window's title bar, offered once the first time a window opens.
-- Windows remember where you drag them. "Fit all windows again" also centres them.
-- Tables refill in place, so scrolling and selection stay put.
+## Hold 0.5.0
+- New Cleanup tab: spare gear (more copies than you can wear), outgrown gear (something you own beats it on every stat) and items nothing in the game uses. Tick them, then sell now or give them a rule. Locked stacks are never listed.
 
-## Course 0.11.0
-- Agility: each path of a course can be picked ("Jump 3: Advanced Path"), or "(best path)". Before, the Simple Path always ran.
-- Tick several steps to move, drag or remove them together. Tick all, Remove finished.
-- Option to take steps off the list once they reach their goal.
-- The State column grows with the window, long waits show in days, and hovering a state shows all of it.
-- Agility steps can run until the bank holds (or you gain) a number of Agility Marks or other obstacle drops.
-- Queue alerts go through Beacon when it is installed.
-- Tour.
-
-## Logbook 0.3.0
-- Tables no longer jump back to the top every refresh. "Only rare drops" applies straight away.
-- Rare drops are sent to Beacon.
-- Tour.
-
-## Beacon 0.4.0
-- New alerts: Course queue (finished, skipped a step, paused) and rare drops from Logbook.
-- Tour.
-
-## Hold 0.4.0, Spyglass 0.2.0, Anchor 0.2.0, Deckhand 0.2.0
-- Tours. Spyglass downloads fresh item data after a game update.
+## Loader 0.3.1
+- The Mods menu shows one line per mod (open, version, key), and only mentions a mod's health when something is wrong. It grows to fit every mod.
+- Check now shows its result straight away.
+- Tours are offered by a green "Take the tour" button instead of a bar that pushed each window's content down.
+- When a window is taller than the screen, its tables get shorter first, so only the table scrolls.
 
 Tested on game version 0.11.7. Found a bug? Mods menu (F1) > Report a bug.

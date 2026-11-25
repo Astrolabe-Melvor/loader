@@ -23,7 +23,7 @@ Start the game. A green tag in the top-left confirms the loader, and **F1** open
 
 After a game update the loader says so in its top-left tag, checks every mod for game calls that no longer exist, and tells mods that cache game data to refresh.
 
-Every mod window has **Help** and a **Tour** in its title bar. The tour points at each part of the window in turn; it is offered once, the first time a window opens. Windows remember where you drag them and how big you make them.
+Every mod window has **Help** and a **Tour** in its title bar. The tour points at each part of the window in turn; until you've opened and closed a window once, its Tour button is green and says "Take the tour". Windows remember where you drag them and how big you make them. When a window is taller than the screen, its tables get shorter first, so you scroll the table, not the window.
 
 ## Releases
 

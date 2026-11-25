@@ -23,10 +23,11 @@ public sealed partial class KitWindow
     Label? _cardTitle, _cardCount;
     RichTextLabel? _cardText;
     Button? _back, _next;
-    PanelContainer? _offer;
+    bool _offered;
     Control? _target;
 
-    /// <summary>Adds a Tour button to the title bar. The first time the window opens, it offers the tour once.</summary>
+    /// <summary>Adds a Tour button to the title bar. Until the window has been opened and closed once, the button is
+    /// green and says "Take the tour" (it takes no room in the window, so nothing moves).</summary>
     public void SetTour(params TourStep[] steps)
     {
         _tour = steps;
@@ -37,25 +38,24 @@ public sealed partial class KitWindow
 
     void OfferTour()
     {
-        if (_tour.Length == 0 || _offer != null) return;
-        LoaderState st = LoaderState.Get();
-        if (st.Toured.Contains(_key)) return;
-
-        _offer = new PanelContainer { ThemeTypeVariation = "Card" };
-        Button go = Kit.Btn("Show me around", () => { Toured(); StartTour(); }, action: true);
-        Button no = Kit.Btn("No thanks", Toured);
-        no.TooltipText = "The Tour button in the title bar runs it any time.";
-        _offer.AddChild(Kit.Row(Kit.Label($"New to {Title}? A short tour points at each part of this window.", Kit.Parchment, 14), Kit.Spacer(), go, no));
-        Body.AddChild(_offer);
-        Body.MoveChild(_offer, 0);
+        if (_tour.Length == 0 || _offered) return;
+        if (LoaderState.Get().Toured.Contains(_key)) return;
+        _offered = true;
+        _tourBtn.Text = "Take the tour";
+        _tourBtn.ThemeTypeVariation = "ActionButton";
+        _tourBtn.TooltipText = $"New to {Title}? A short walk through this window, pointing at each part. After this the button just says Tour.";
     }
 
+    // Offered once: the first close (or starting the tour) puts the button back to plain "Tour".
     void Toured()
     {
+        if (!_offered) return;
+        _offered = false;
         LoaderState st = LoaderState.Get();
         if (!st.Toured.Contains(_key)) { st.Toured.Add(_key); LoaderState.Save(); }
-        _offer?.QueueFree();
-        _offer = null;
+        _tourBtn.Text = "Tour";
+        _tourBtn.ThemeTypeVariation = "";
+        _tourBtn.TooltipText = "A short walk through this window, pointing at each part";
     }
 
     /// <summary>Starts the tour from the first step (opens the window if it is closed).</summary>
@@ -63,7 +63,7 @@ public sealed partial class KitWindow
     {
         if (_tour.Length == 0) return;
         if (!_layer.Visible) Open();
-        if (_offer != null) Toured();
+        Toured();
         if (_helpCard.Visible) ToggleHelp();
         BuildOverlay();
         Go(0);

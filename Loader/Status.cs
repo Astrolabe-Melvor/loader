@@ -236,8 +236,8 @@ internal static class Updates
         }
         catch (Exception e) { Status = "Couldn't read the release list: " + e.Message; Changed?.Invoke(); return; }
         Newer = newer;
-        Changed?.Invoke();
         Status = newer.Count == 0 ? $"Up to date (latest release {tag})." : $"Updates in {tag}: " + string.Join(", ", newer.Select(n => $"{n.Item1} {n.Item2} to {n.Item3}"));
+        Changed?.Invoke();   // after Status: the Mods menu reads it
         if (announce && newer.Count > 0) Toast.Show($"Astrolabe updates: {string.Join(", ", newer.Select(n => $"{n.Item1} {n.Item3}"))}. Mods menu ({Hotkeys.MenuKey}) has the link.", Kit.Link);
     }
 }

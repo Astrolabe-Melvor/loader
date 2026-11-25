@@ -141,7 +141,12 @@ public sealed partial class KitWindow
         _scroll.AddChild(Body);
         column.AddChild(_scroll);
         // Content that grows (a longer list, a new row) grows the window; it only shrinks back when reopened.
-        Body.MinimumSizeChanged += () => { if (_layer.Visible && !Sized) Callable.From(() => Fit(shrink: false)).CallDeferred(); };
+        Body.MinimumSizeChanged += () =>
+        {
+            if (!_layer.Visible) return;
+            if (Sized) Callable.From(() => SqueezeTables(_scroll.Size.Y)).CallDeferred();
+            else Callable.From(() => Fit(shrink: false)).CallDeferred();
+        };
 
         // Corner grip: drag to resize, double-click to go back to fitting the content.
         var grip = new Control
@@ -208,6 +213,7 @@ public sealed partial class KitWindow
             Root.CustomMinimumSize = Vector2.Zero;
             _scroll.CustomMinimumSize = Vector2.Zero;
             Root.Size = new Vector2(Mathf.Min(saved.X, room.X), Mathf.Min(saved.Y, room.Y));
+            SqueezeTables(Root.Size.Y - Root.GetCombinedMinimumSize().Y - 8);
             return;
         }
         Fit();
@@ -224,12 +230,52 @@ public sealed partial class KitWindow
         // Room for the body: the screen less the frame, title bar, help and grip around it.
         float chromeY = Root.GetCombinedMinimumSize().Y - _scroll.CustomMinimumSize.Y + 8;
         float chromeX = 48;
+        // Tables give up height first, so the window only scrolls when even short tables don't fit.
+        SqueezeTables(screen.Y - 24 - chromeY);
+        want = Body.GetCombinedMinimumSize();
+        if (!shrink) want = new Vector2(Mathf.Max(want.X, _scroll.Size.X), Mathf.Max(want.Y, _scroll.Size.Y));
         _scroll.CustomMinimumSize = new Vector2(
             Mathf.Min(want.X, Mathf.Max(200, screen.X - 24 - chromeX)),
             Mathf.Min(want.Y, Mathf.Max(160, screen.Y - 24 - chromeY)));
         Root.CustomMinimumSize = new Vector2(Mathf.Min(_baseMin.X, screen.X - 24), Mathf.Min(_baseMin.Y, screen.Y - 24));
         Root.ResetSize();
         if (_placed) Callable.From(KeepOnScreen).CallDeferred();
+    }
+
+    // Tables (Tree controls set to fill the height) at their own minimum height, before squeezing.
+    readonly Dictionary<Tree, float> _tableMin = new();
+    const float TableFloor = 150;
+
+    /// <summary>
+    /// Shortens the visible tables so the body fits <paramref name="room"/>, none below <see cref="TableFloor"/>, instead
+    /// of the whole window scrolling around a table that scrolls too. Each table's own minimum comes back when there is room.
+    /// </summary>
+    void SqueezeTables(float room)
+    {
+        foreach (var (t, h) in _tableMin)
+            if (GodotObject.IsInstanceValid(t)) t.CustomMinimumSize = new Vector2(t.CustomMinimumSize.X, h);
+        _tableMin.Clear();
+        float over = Body.GetCombinedMinimumSize().Y - room;
+        if (over <= 0) return;
+        foreach (Tree t in Tables(Body))
+        {
+            float h = t.CustomMinimumSize.Y, cut = Mathf.Min(over, h - TableFloor);
+            if (cut <= 0) continue;
+            _tableMin[t] = h;
+            t.CustomMinimumSize = new Vector2(t.CustomMinimumSize.X, h - cut);
+            over -= cut;
+            if (over <= 0) break;
+        }
+    }
+
+    static IEnumerable<Tree> Tables(Node n)
+    {
+        foreach (Node c in n.GetChildren())
+        {
+            if (c is CanvasItem { Visible: false }) continue;
+            if (c is Tree t) { if ((t.SizeFlagsVertical & Control.SizeFlags.Expand) != 0) yield return t; }
+            else foreach (Tree x in Tables(c)) yield return x;
+        }
     }
 
     void OnGripInput(InputEvent e)
@@ -314,6 +360,7 @@ public sealed partial class KitWindow
         _layer.Visible = false;
         _dragging = _resizing = false;
         EndTour();
+        Toured();
         Closed?.Invoke();
     }
 

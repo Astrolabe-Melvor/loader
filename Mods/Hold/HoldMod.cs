@@ -16,6 +16,9 @@ public sealed class HoldMod : IMod
         _entry = ctx.AddWindow("Hold", Toggle, Key.F9);
         _entry.Changed += () => _window?.SetKeyLabel(_entry.KeyLabel);
         ctx.Frame += () => _keeper.Tick(GameAccess.CurrentGame, Time.GetTicksMsec() / 1000.0);
+        // What each item is for (for the Cleanup tab); fetched fresh after a game update.
+        Cleanup.Load(ctx.Directory, ctx.Log);
+        Messages.Subscribe("loader.gameupdated", _ => Cleanup.Refresh(ctx.Directory, ctx.Log));
         ctx.Log("Ready. F9 opens Hold.");
     }
 

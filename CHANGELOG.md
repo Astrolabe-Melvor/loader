@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+- Hold 0.5.0: Cleanup tab: spare gear, outgrown gear and unused items in your bank, to sell now or give a rule. Same list as Astrolabe Tools' Bank cleanup.
+- Loader 0.3.1: the tour is offered by a green "Take the tour" button instead of a bar that pushed every window's content down; tables shrink to fit the screen before a window scrolls; one card per mod in the Mods menu; Check now shows its result; Theme preview hidden (mod makers: put a file named `dev` in the mods folder).
+
 ## Loader 0.3.0
 - Mods menu shows each mod's version and health: loaded, did not load, paused after errors, or calling game code that a game update removed.
 - Daily update check against the newest GitHub release (only the release list is read). Get updates opens the release page.
