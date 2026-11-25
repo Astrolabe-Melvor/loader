@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using GamesByMalcs.Melvor2.Saves;
 using MelvorModLoader;
+using Astrolabe.UI;
 
 namespace Astrolabe.Anchor;
 
@@ -85,7 +86,7 @@ public sealed class Vault
         }
 
         // The open character, on the timer. The save file is what the game last wrote (it saves every few seconds).
-        if (GameAccess.CurrentGame == null || ActiveId() is not Guid active || GameAccess.IsComputingOffline) { _next = -1; return; }
+        if (KitGame.Current == null || ActiveId() is not Guid active || GameAccess.IsComputingOffline) { _next = -1; return; }
         if (_next < 0) { _next = now + Options.EveryMinutes * 60; return; }
         if (now < _next) return;
         _next = now + Options.EveryMinutes * 60;
@@ -105,7 +106,7 @@ public sealed class Vault
             if (s_activeProp?.GetValue(null) is Guid g && g != Guid.Empty) return g;
         }
         catch { }
-        string? name = GameAccess.CurrentGame?.CharacterName;
+        string? name = KitGame.Current?.CharacterName;
         foreach (var (id, saves) in SaveManager.StoredSaves)
         {
             try { if (saves.GetMostRecentSave().Save.Header.CharacterName == name) return id; } catch { }
@@ -231,7 +232,7 @@ public sealed class Vault
     /// over it within seconds. The current save is backed up first, so a restore can be undone.</summary>
     public async Task<string> Restore(Guid id, Backup b)
     {
-        if (GameAccess.CurrentGame != null) return "Return to the title screen first: the open character would save over it.";
+        if (KitGame.Current != null) return "Return to the title screen first: the open character would save over it.";
         string? text = Text(id, b);
         if (text == null) return "The backup file is missing.";
         if (!SaveManager.TryGetHeaderFromSaveString(text, out SaveHeader? h) || h.IsCorrupt) return "The backup can't be read as a save.";

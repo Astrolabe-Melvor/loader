@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using Godot;
-using MelvorModLoader;
 
 namespace Astrolabe.UI;
 
@@ -10,9 +9,9 @@ namespace Astrolabe.UI;
 /// with a card saying what it is. <paramref name="Before"/> runs when the step opens, to switch to the right tab,
 /// say, or open a section first. Targets are looked up when the step opens, so rows built later still work.
 /// </summary>
-public sealed record TourStep(string Title, string Text, Func<Control?>? Target = null, Action? Before = null);
+sealed record TourStep(string Title, string Text, Func<Control?>? Target = null, Action? Before = null);
 
-public sealed partial class KitWindow
+sealed partial class KitWindow
 {
     readonly Button _tourBtn;
     TourStep[] _tour = Array.Empty<TourStep>();
@@ -39,7 +38,7 @@ public sealed partial class KitWindow
     void OfferTour()
     {
         if (_tour.Length == 0 || _offered) return;
-        if (LoaderState.Get().Toured.Contains(_key)) return;
+        if (WindowPrefs.Toured(_key)) return;
         _offered = true;
         _tourBtn.Text = "Take the tour";
         _tourBtn.ThemeTypeVariation = "ActionButton";
@@ -51,8 +50,7 @@ public sealed partial class KitWindow
     {
         if (!_offered) return;
         _offered = false;
-        LoaderState st = LoaderState.Get();
-        if (!st.Toured.Contains(_key)) { st.Toured.Add(_key); LoaderState.Save(); }
+        WindowPrefs.MarkToured(_key);
         _tourBtn.Text = "Tour";
         _tourBtn.ThemeTypeVariation = "";
         _tourBtn.TooltipText = "A short walk through this window, pointing at each part";
@@ -122,7 +120,7 @@ public sealed partial class KitWindow
         if (i < 0 || i >= _tour.Length) return;
         _step = i;
         TourStep s = _tour[i];
-        try { s.Before?.Invoke(); } catch (Exception e) { Log.Write($"Tour step '{s.Title}': {e.Message}"); }
+        try { s.Before?.Invoke(); } catch (Exception e) { KitLog.Write($"Tour step '{s.Title}': {e.Message}"); }
         _cardTitle!.Text = s.Title;
         _cardCount!.Text = $"{i + 1} of {_tour.Length}";
         _cardText!.Text = s.Text;

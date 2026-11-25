@@ -203,6 +203,7 @@ sealed class QueueWindow
         _optAlerts = Option("Play a sound and flash the taskbar when the queue finishes, skips a step or pauses", s => s.Alerts, (s, v) => s.Alerts = v);
         _optFood = Option("Stop a combat step when the selected food runs out", s => s.FoodGuard, (s, v) => s.FoodGuard = v);
         _optBank = Option("Pause the queue when the bank is full", s => s.BankGuard, (s, v) => s.BankGuard = v);
+        optBox.AddChild(Option("Show a Queue button on the game's skill and combat pages (top right): it opens Add a step with that page's action picked", s => s.PageButton, (s, v) => s.PageButton = v));
         optBox.AddChild(Option("Take steps off the list once they reach their goal (kept while the queue loops; skipped steps stay so you can see them)", s => s.RemoveFinished, (s, v) => s.RemoveFinished = v));
         _optHud = Option("Show the current step in a small panel while the queue runs (drag it anywhere, \"–\" folds it)", s => s.Hud, (s, v) => s.Hud = v);
         _optGear = Option("Put on each step's gear when it starts: combat loadouts, weapons and stances, and skill toolbelt sets with refills", s => s.AutoGear, (s, v) => s.AutoGear = v);
@@ -272,7 +273,7 @@ sealed class QueueWindow
         _win.SetTour(
             new TourStep("What Course does", "Course runs your actions one after another: cut 500 logs, then burn them, then fight until level 40. Build the list, press [b]Start[/b], and it keeps going while you play or idle."),
             new TourStep("Tabs", "[b]Add a step[/b] is where most steps come from. [b]Plan an item[/b] works out every step to make something. [b]Saved and shared[/b] keeps queues and share codes from the wiki planner. [b]Options[/b] changes how the queue behaves.", () => tabRow, () => Tab(0)),
-            new TourStep("Pick the action", "Choose a skill, then the action. [b]Copy what I'm doing[/b] fills in what your character is doing now. Agility lists each path of a course on its own, or \"(best path)\" to let Course pick.", () => doRow, () => Tab(0)),
+            new TourStep("Pick the action", "Choose a skill, then the action. [b]Copy what I'm doing[/b] fills in what your character is doing now. Agility lists each path of a course on its own, or \"(best path)\" to let Course pick. The game's skill pages also get a [b]Queue[/b] button (top right) that opens this with that page's action picked.", () => doRow, () => Tab(0)),
             new TourStep("Say when it ends", "Pick the goal: a level, an amount, until the bank holds some, and so on. [b]Add step[/b] puts it at the bottom of the list. A line under this shows how long it should take.", () => _goalRow, () => Tab(0)),
             new TourStep("The list", "Steps run top to bottom. Tick the boxes to work on several at once, drag rows to reorder them, and double-click a step to change it. [b]State[/b] shows progress.", () => _table),
             new TourStep("Edit the list", "These work on the ticked steps, or the selected one if none are ticked. [b]Undo[/b] takes back the last change, even [b]Remove all[/b].", () => stepRow),
@@ -285,6 +286,19 @@ sealed class QueueWindow
     public void SetKeyLabel(string key) => _win.CloseText = key.Length > 0 ? $"Close ({key})" : "Close";
     public void Toggle() => _win.Toggle();
     public void Open() => _win.Open();
+
+    /// <summary>Opens the Add a step tab with this action picked (the Queue button on the game's skill pages).</summary>
+    public void AddFrom(ActionRef r)
+    {
+        _win.Open();
+        if (_editing >= 0) StopEditing();
+        _tabPinned = true;
+        ShowTab(0);
+        if (KitGame.Current is not Game game) return;
+        _do.Fill(game);
+        _do.Show(r);
+        OnActionPicked();
+    }
 
     /// <summary>Opens the planner on an item (sent by another mod, such as Spyglass). Item id: local or full.</summary>
     public void PlanFor(string item, int amount)
@@ -397,7 +411,7 @@ sealed class QueueWindow
 
     void OnOpened()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game != null)
         {
             _do.Fill(game);
@@ -479,7 +493,7 @@ sealed class QueueWindow
 
     void OnActionPicked()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game != null && !_do.IsSell) FillGoals(game, _do.IsTech ? Goal.Technique : _do.IsBest ? Goal.Level : null);
         RefreshTargets();
         Suggest();
@@ -490,7 +504,7 @@ sealed class QueueWindow
     {
         bool sell = _do.IsSell;
         Goal g = SelectedGoal;
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         ActionRef? a = _do.Selected;
 
         _goal.Visible = !sell && _goal.ItemCount > 0;
@@ -557,7 +571,7 @@ sealed class QueueWindow
     /// <summary>Starts the amount from where you are now. Skipped while a step is being loaded for editing.</summary>
     void Suggest()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (_loading || game == null) { UpdateSummary(); return; }
         Goal g = SelectedGoal;
         string? id = _target.SelectedId;
@@ -611,7 +625,7 @@ sealed class QueueWindow
     void UpdateSummary()
     {
         if (_summary is null || _gearRow is null) return;   // still building the window
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         Step? s = game == null ? null : BuildStep();
         _add.Disabled = s == null;
         if (game == null) { _summary.Text = ""; return; }
@@ -760,7 +774,7 @@ sealed class QueueWindow
 
     void Edit(int i)
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game == null || i < 0 || i >= _queue.State.Steps.Count) return;
         Step s = _queue.State.Steps[i];
         if (s.IsShop) { _stepHint.Text = "Shop steps can't be edited: remove it and plan the item again."; return; }
@@ -798,7 +812,7 @@ sealed class QueueWindow
 
     void FillPlanItems()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         PlanData? data = PlanData.Get(_queue.Folder, _queue.Log);
         if (game == null) return;
         if (data == null) { _planNote.Text = $"Planner data: {PlanData.State}. It comes from {PlanData.Url} and is kept for offline use."; return; }
@@ -824,7 +838,7 @@ sealed class QueueWindow
         _planTable.Clear();
         _plan = new();
         _planAdd.Disabled = true;
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         PlanData? data = PlanData.Get(_queue.Folder, _queue.Log);
         if (game == null || data == null || _planItem.SelectedId == null) return;
 
@@ -927,7 +941,7 @@ sealed class QueueWindow
 
     void PasteCode()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game == null) return;
         var (steps, problems) = ShareCode.Import(game, DisplayServer.ClipboardGet());
         if (steps.Count > 0) _queue.AddRange(steps);
@@ -1041,7 +1055,7 @@ sealed class QueueWindow
     /// <summary>After the loadout or weapon changes: the other lists depend on it.</summary>
     void RefreshCombat()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game == null || !_gearRow.Visible) { UpdateSummary(); return; }
         FillWeapons(game, SelectedWeapon);
         FillStances(game, SelectedStance);
@@ -1081,7 +1095,7 @@ sealed class QueueWindow
     void RefreshGearGrid()
     {
         foreach (Node n in _gearGrid.GetChildren()) { _gearGrid.RemoveChild(n); n.QueueFree(); }
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game == null) return;
         List<Gear.Choice> loadouts = Gear.Loadouts(game);
         string? combatId = Gear.CombatId(game);
@@ -1202,7 +1216,7 @@ sealed class QueueWindow
 
         // Rows are updated in place (Kit.Rows), so the list keeps its scroll position while the queue runs.
         TreeItem[] rows = Kit.Rows(_table, Math.Max(1, st.Steps.Count));
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         var current = new HashSet<Step>(st.Running ? _queue.CurrentSteps() : Enumerable.Empty<Step>());
         for (int i = 0; i < st.Steps.Count; i++)
         {
@@ -1317,7 +1331,7 @@ sealed class QueueWindow
         if (now < _nextTick) return;
         _nextTick = now + 0.3;
 
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game != null && _do.IsEmpty) { OnOpened(); return; }   // a character was loaded while the window was open
         if (_tab == 1 && _panels[1].Visible && _planItem.SelectedId == null && PlanData.Loaded != null) FillPlanItems();
 
@@ -1370,7 +1384,7 @@ sealed class ActionPicker
     public bool IsBest => IsAny || IsTech || ActionPick.SelectedId == Starter.BestTarget || ActionPick.SelectedId == Starter.GoldTarget;
     public bool IsTech => ActionPick.SelectedId?.StartsWith(Finesse.TechPrefix) == true;
     public ActiveAgilityTechnique? SelectedTech =>
-        IsTech && GameAccess.CurrentGame is { } g ? Finesse.Technique(g, ActionPick.SelectedId![Finesse.TechPrefix.Length..]) : null;
+        IsTech && KitGame.Current is { } g ? Finesse.Technique(g, ActionPick.SelectedId![Finesse.TechPrefix.Length..]) : null;
     public bool IsGold => IsAny || ActionPick.SelectedId == Starter.GoldTarget;
     public bool IsAny => SkillId == AnyId;
     public bool IsSlayer => ActionPick.SelectedId == Slayer.Target;
@@ -1422,10 +1436,10 @@ sealed class ActionPicker
         if (s == null) { ActionPick.SetItems(Enumerable.Empty<PickItem>()); return; }
         var picks = new List<PickItem>();
         if (_allowBest) picks.Add(new PickItem(Starter.BestTarget, "Fastest XP (switches as you level)", s.Icon, Note: "train"));
-        if (_allowBest && !Gear.IsCombat(GameAccess.CurrentGame!, s.Id)) picks.Add(new PickItem(Starter.GoldTarget, "Most GP (switches as you level)", s.Icon, Note: "gold"));
-        if (_allowBest && Gear.IsCombat(GameAccess.CurrentGame!, s.Id)) picks.Add(new PickItem(Slayer.Target, "Slayer tasks (follows your tasks)", s.Icon, Note: "slayer"));
-        if (_allowBest && Finesse.Agility(GameAccess.CurrentGame!)?.Entity.Id == s.Id)
-            foreach (var t in Finesse.Techniques(GameAccess.CurrentGame!))
+        if (_allowBest && !Gear.IsCombat(KitGame.Current!, s.Id)) picks.Add(new PickItem(Starter.GoldTarget, "Most GP (switches as you level)", s.Icon, Note: "gold"));
+        if (_allowBest && Gear.IsCombat(KitGame.Current!, s.Id)) picks.Add(new PickItem(Slayer.Target, "Slayer tasks (follows your tasks)", s.Icon, Note: "slayer"));
+        if (_allowBest && Finesse.Agility(KitGame.Current!)?.Entity.Id == s.Id)
+            foreach (var t in Finesse.Techniques(KitGame.Current!))
                 picks.Add(new PickItem(Finesse.TechPrefix + t.Technique.Id, $"Train {t.Technique.DisplayName} technique (level {t.Experience.Level}/{t.Experience.LevelCap})", s.Icon, Note: "technique"));
         picks.AddRange(s.Actions.Select(a => new PickItem(Key(a.Ref), a.Name, a.Icon, a.LockedNow, a.LockedNow ? (a.Key != null && Catalog.QuestOnly(a.Key) ? "needs its quest" : "locked") : "")));
         // Default to the best action you can do now.
@@ -1446,7 +1460,7 @@ sealed class ActionPicker
 
     public void UseCurrent()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game == null) return;
         Fill(game);
         Show(Starter.Current(game));

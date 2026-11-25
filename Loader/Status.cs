@@ -35,8 +35,6 @@ internal sealed class LoaderState
     public bool CheckUpdates { get; set; } = true;
     public DateTime LastUpdateCheck { get; set; }
     public string LatestRelease { get; set; } = "";
-    /// <summary>Kit windows whose tour was offered (taken or turned down).</summary>
-    public List<string> Toured { get; set; } = new();
 
     static LoaderState? s_state;
     static string FilePath => Path.Combine(Startup.ModsFolder, "loader-state.json");

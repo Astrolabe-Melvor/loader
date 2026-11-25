@@ -126,7 +126,7 @@ sealed class AnchorWindow
     {
         // Default to the open character, else keep the pick.
         Guid? keepId = Who?.Id;
-        if (GameAccess.CurrentGame != null && Vault.ActiveId() is Guid active && keepId == null) keepId = active;
+        if (KitGame.Current != null && Vault.ActiveId() is Guid active && keepId == null) keepId = active;
         _chars = _v.Characters();
         _who.Clear();
         foreach (Character c in _chars) _who.AddItem(c.InGame ? c.Name : $"{c.Name} (not in the game now)");
@@ -140,7 +140,7 @@ sealed class AnchorWindow
         _table.Clear();
         TreeItem root = _table.CreateItem();
         Character? who = Who;
-        bool inGame = GameAccess.CurrentGame != null;
+        bool inGame = KitGame.Current != null;
         if (who == null)
         {
             _summary.Text = "No characters yet. Backups start once the game has read its saves.";
@@ -189,7 +189,7 @@ sealed class AnchorWindow
         _copy.Disabled = _delete.Disabled = _saveNote.Disabled = !on;
         _editNote.Editable = on;
         _editNote.Text = _sel?.Note ?? "";
-        bool inGame = GameAccess.CurrentGame != null;
+        bool inGame = KitGame.Current != null;
         _restore.Disabled = !on || inGame;
         _restore.Text = "Restore this backup";
         _restore.TooltipText = inGame ? "Return to the title screen first: the open character would save over a restore within seconds." : "";

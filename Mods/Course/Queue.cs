@@ -12,6 +12,7 @@ using GamesByMalcs.Melvor2.Data.Items;
 using GamesByMalcs.Melvor2.Entities;
 using GamesByMalcs.Melvor2.EventBus;
 using MelvorModLoader;
+using Astrolabe.UI;
 
 namespace Astrolabe.Course;
 
@@ -128,6 +129,7 @@ public sealed class QueueState
     public bool FoodGuard { get; set; } = true;   // stop a combat step when the selected food runs out
     public bool BankGuard { get; set; } = true;   // pause when the bank is full
     public bool Hud { get; set; } = true;         // show the current step in a corner of the screen
+    public bool PageButton { get; set; } = true;   // a Queue button on the game's skill pages
     public bool RemoveFinished { get; set; }      // take steps off the list once they reach their goal (not while looping)
     public float HudX { get; set; } = -1;          // panel position, -1 = default spot (top-left, beside the logo)
     public float HudY { get; set; } = -1;
@@ -176,6 +178,28 @@ sealed class Queue
     double _nextCheck;
     Game? _game;
 
+    // ---- while the game is closed ----
+    // The game catches up on time away by running its ticks on a worker thread with the screen paused. A tick
+    // listener (OfflineTicker) runs the queue then too, every two game seconds, on that thread. Anything that would
+    // touch the screen (alerts, window refreshes) waits until the game is back; times use the game time being
+    // simulated, so "for 30 minutes" and history times come out right.
+    int _mainThread = -1;   // the thread frames run on; set from the first frame or the game screen appearing
+    readonly object _gate = new();
+    bool _offline, _wasOffline, _hadOffline, _pendingChanged;
+    readonly List<string> _pendingAlerts = new();
+    DateTime _virtualBase, _virtualUtc, _lastOnlineUtc;
+    double _simSeconds, _nextOfflineRun, _lastNow;
+    int _offlineSteps;
+    Game? _tickerFor;
+
+    DateTime UtcNow => _offline ? _virtualUtc : DateTime.UtcNow;
+
+    void Notify()
+    {
+        if (_offline) _pendingChanged = true;
+        else Changed?.Invoke();
+    }
+
     // Finished actions per skill entity, counted from the game's own "action performed" event (Times goal).
     static readonly Dictionary<string, long> s_performed = new();
 
@@ -192,7 +216,7 @@ sealed class Queue
     public void Note(string text)
     {
         _log(text);
-        var e = new HistoryEntry(DateTime.Now, text);
+        var e = new HistoryEntry(_offline ? _virtualUtc.ToLocalTime() : DateTime.Now, text);
         History.Add(e);
         if (History.Count > 500) History.RemoveRange(0, History.Count - 500);
         if (!HasCharacter) return;
@@ -208,7 +232,7 @@ sealed class Queue
     {
         History.Clear();
         try { File.Delete(HistoryFile); } catch { }
-        Changed?.Invoke();
+        Notify();
     }
 
     void LoadHistory()
@@ -229,8 +253,9 @@ sealed class Queue
     public void Raise(string text)
     {
         Note(text);
+        if (_offline) { _pendingAlerts.Add(text); return; }   // sounds and Beacon once the game is back
         if (State.Alerts) Alert?.Invoke(text);
-        MelvorModLoader.Messages.Publish("course.alert", text);   // Beacon can show it or post it to Discord
+        Messages.Publish("course.alert", text);   // Beacon can show it or post it to Discord
     }
 
     public Queue(string folder, Action<string> log)
@@ -263,7 +288,7 @@ sealed class Queue
         State = Read(LiveFile) ?? new QueueState();
         LoadHistory();
         Status = State.Running ? "Resuming" : "Not running";
-        Changed?.Invoke();
+        Notify();
     }
 
     QueueState? Read(string file)
@@ -318,14 +343,14 @@ sealed class Queue
     public void DeleteSaved(string name)
     {
         try { File.Delete(Path.Combine(SavedFolder, Safe(name) + ".json")); } catch { }
-        if (State.Name == name) Edit(() => State.Name = ""); else Changed?.Invoke();
+        if (State.Name == name) Edit(() => State.Name = ""); else Notify();
     }
 
     void Edit(Action change)
     {
         change();
         Save();
-        Changed?.Invoke();
+        Notify();
     }
 
     readonly List<(string Steps, string What)> _undo = new();
@@ -495,6 +520,8 @@ sealed class Queue
 
     void Hook(Game game)
     {
+        // The game's tick list is read by the offline worker, so only join it while the game is running normally.
+        if (_tickerFor != game && !GameAccess.IsComputingOffline) { _tickerFor = game; OfflineTicker.Register(game, this, _log); }
         if (_game == game) return;
         _game = game;
         try
@@ -547,29 +574,29 @@ sealed class Queue
             case Goal.Times: return $"{(s.Begun ? Performed(s.CountKey) - s.StartTimes : 0):N0} / {s.Amount:N0}";
             case Goal.Minutes:
                 if (!s.Begun) return $"{s.Amount} min";
-                double left = s.Amount - (DateTime.UtcNow - s.StartedUtc).TotalMinutes;
+                double left = s.Amount - (UtcNow - s.StartedUtc).TotalMinutes;
                 return left > 0 ? $"{Math.Ceiling(left)} min left" : "done";
             default: return "";
         }
     }
 
     // "  ~12 min left", from the pace since the step began (shown after a minute, once the pace means something).
-    static string Eta(Step s, int gained, int left)
+    string Eta(Step s, int gained, int left)
     {
         if (!s.Begun || s.Done || gained <= 0 || left <= 0) return "";
-        double minutes = (DateTime.UtcNow - s.StartedUtc).TotalMinutes;
+        double minutes = (UtcNow - s.StartedUtc).TotalMinutes;
         if (minutes < 1) return "";
         double eta = left / (gained / minutes);
         return eta < 1 ? "  ~1 min left" : eta < 120 ? $"  ~{Math.Ceiling(eta)} min left"
             : eta < 48 * 60 ? $"  ~{eta / 60:0.#} h left" : $"  ~{eta / 1440:0.#} days left";
     }
 
-    static bool Reached(Game game, Step s) => s.Goal switch
+    bool Reached(Game game, Step s) => s.Goal switch
     {
         Goal.Level => Level(game, s.Skill) >= s.Amount,
         Goal.BankCount => BankCount(game, s.Item) >= s.Amount,
         Goal.MoreItems => s.Begun && BankCount(game, s.Item) - s.StartCount >= s.Amount,
-        Goal.Minutes => s.Begun && (DateTime.UtcNow - s.StartedUtc).TotalMinutes >= s.Amount,
+        Goal.Minutes => s.Begun && (UtcNow - s.StartedUtc).TotalMinutes >= s.Amount,
         Goal.Times => s.Begun && Performed(s.CountKey) - s.StartTimes >= s.Amount,
         Goal.Gold => ShopSource.Gp(game) >= s.Amount,
         Goal.Technique => (Finesse.Technique(game, s.Item)?.Experience.Level ?? 0) >= s.Amount,
@@ -601,11 +628,92 @@ sealed class Queue
         _foodNote = did.StartsWith("ate") ? "" : did;   // repeat "ate" notes, not "no healing food" ones
     }
 
+    /// <summary>
+    /// The game screen was just created for a character, before any frame: get ready now, because the game may
+    /// start catching up on time away straight after (frames are paused while it does).
+    /// </summary>
+    public void Attach(Game game)
+    {
+        lock (_gate)
+        {
+            _mainThread = Environment.CurrentManagedThreadId;
+            _lastOnlineUtc = default;   // a game just loaded: time away counts from its save
+            Hook(game);
+            if (game.CharacterName != _character) LoadFor(game.CharacterName);
+        }
+    }
+
+    /// <summary>Once per game tick, from <see cref="OfflineTicker"/>: online ticks only note the time; offline ticks
+    /// run the queue every two game seconds.</summary>
+    public void GameTick(Game game)
+    {
+        if (_mainThread == -1 || Environment.CurrentManagedThreadId == _mainThread)
+        {
+            _lastOnlineUtc = DateTime.UtcNow;
+            return;
+        }
+        if (!State.Running || !HasCharacter || game.CharacterName != _character || _game != game) return;
+        if (!_wasOffline)
+        {
+            _wasOffline = _hadOffline = true;
+            _simSeconds = _nextOfflineRun = 0;
+            _offlineSteps = State.Steps.Count(x => x.Done);
+            // Time away starts when the game last ran: the last frame, or for a game just loaded, its save time.
+            _virtualBase = _lastOnlineUtc != default ? _lastOnlineUtc : game.LoadedSaveTimestamp.ToUniversalTime();
+        }
+        _simSeconds += GamesByMalcs.Melvor2.Core.Constants.TickInterval / 1000.0;
+        if (_simSeconds < _nextOfflineRun) return;
+        _nextOfflineRun = _simSeconds + 2;
+        lock (_gate)
+        {
+            _offline = true;
+            _virtualUtc = _virtualBase.AddSeconds(_simSeconds);
+            try { RunQueue(game, _lastNow + _simSeconds); }
+            catch (Exception e) { _log("While the game was closed: " + e.Message); _nextOfflineRun = double.MaxValue; }
+            finally { _offline = false; }
+        }
+    }
+
+    // Back from time away: the step timers ran on game time, so start them fresh; then the alerts and the window.
+    void AfterOffline()
+    {
+        _wasOffline = false;
+        if (_hadOffline)
+        {
+            _hadOffline = false;
+            _nextCheck = _nextSlayer = _nextFeed = _buffAt = 0;
+            foreach (Step x in State.Steps) { x.RetryAt = x.BestCheckAt = x.BeltCheckAt = x.LastRestart = 0; x.FailedUntil.Clear(); }
+            int moved = State.Steps.Count(x => x.Done) - _offlineSteps;
+            if (moved > 0) Note($"While the game was closed, the queue finished {moved} step{(moved == 1 ? "" : "s")}.");
+            foreach (string a in _pendingAlerts)
+            {
+                if (State.Alerts) Alert?.Invoke(a);
+                Messages.Publish("course.alert", a);
+            }
+            _pendingAlerts.Clear();
+            _pendingChanged = true;
+        }
+        if (!_pendingChanged) return;
+        _pendingChanged = false;
+        Save();
+        Changed?.Invoke();
+    }
+
     public void Tick(Game? game, double now)
     {
         if (game == null) { _character = ""; return; }
+        lock (_gate) TickOnline(game, now);
+    }
+
+    void TickOnline(Game game, double now)
+    {
+        if (GameAccess.IsComputingOffline) return; // a loader whose frames keep running during time away
+        _mainThread = Environment.CurrentManagedThreadId;
+        _lastNow = now;
+        _lastOnlineUtc = DateTime.UtcNow;
         Hook(game);
         if (game.CharacterName != _character) LoadFor(game.CharacterName);
+        if (_wasOffline || _hadOffline || _pendingChanged) AfterOffline();
 
         // Slayer rules all the time (Options), unless a Slayer tasks step is applying them already.
         if (State.SlayerAlways && now >= _nextSlayer && !GameAccess.IsComputingOffline
@@ -622,6 +730,12 @@ sealed class Queue
             try { Feed(game, now); } catch (Exception e) { Log("Food: " + e.Message); }
         }
 
+        RunQueue(game, now);
+    }
+
+    // The steps' turn: twice a second while playing, every two game seconds while the game catches up on time away.
+    void RunQueue(Game game, double now)
+    {
         if (!State.Running || now < _nextCheck) return;
         _nextCheck = now + 0.5;
 
@@ -634,7 +748,7 @@ sealed class Queue
                 Status = "Paused: the bank is full";
                 Raise("Paused: the bank is full. Make room (or add a Sell step) and press Start.");
                 Save();
-                Changed?.Invoke();
+                Notify();
             }
             return;
         }
@@ -653,7 +767,7 @@ sealed class Queue
             { WearIdle(game); Starter.Start(game, State.Idle); }
 
         Status = string.Join("  +  ", after.Select(s => $"{Label(s)}: {(s.State.Length > 0 ? s.State : "starting")}"));
-        if (changed) { Save(); Changed?.Invoke(); }
+        if (changed) { Save(); Notify(); }
     }
 
     /// <summary>"Woodcutting: Mahogany Tree", or for a train-a-skill step "Train Woodcutting (Mahogany Tree)".</summary>
@@ -819,7 +933,7 @@ sealed class Queue
             if (!s.Begun)
             {
                 s.Begun = true;
-                s.StartedUtc = DateTime.UtcNow;
+                s.StartedUtc = UtcNow;
                 s.StartCount = Count(game, s);
                 s.StartTimes = Performed(s.CountKey);
                 Note($"Step {index + 1}: {Label(s)}, {s.GoalText()}");
@@ -946,7 +1060,7 @@ sealed class Queue
             Status = "Starting over";
             Note("Queue finished; starting over");
             Save();
-            Changed?.Invoke();
+            Notify();
             return;
         }
         State.Running = false;
@@ -955,6 +1069,6 @@ sealed class Queue
         if (State.Idle != null) { { WearIdle(game); Starter.Start(game, State.Idle); } Status += $"; now {State.Idle.Label}"; }
         Raise("Queue finished" + (State.Idle != null ? $"; now {State.Idle.Label}" : ""));
         Save();
-        Changed?.Invoke();
+        Notify();
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using Godot;
 using MelvorModLoader;
+using Astrolabe.UI;
 
 namespace Astrolabe.Course;
 
@@ -11,6 +12,7 @@ public sealed class CourseMod : IMod
     QueueWindow? _window;
     QueueHud? _hud;
     Inbox? _inbox;
+    PageButton? _pageButton;
     ModWindow? _entry;
 
     public void OnLoad(ModContext ctx)
@@ -24,16 +26,27 @@ public sealed class CourseMod : IMod
 
         _hud = new QueueHud(_queue);
         _hud.Clicked += () => { EnsureWindow(); _window!.Open(); };
-        _queue.Alert += text => _hud.Alert(GameAccess.CurrentGame, text);
+        _queue.Alert += text => _hud.Alert(KitGame.Current, text);
+        _pageButton = new PageButton(r => { EnsureWindow(); _window!.AddFrom(r); });
+
+        // A loaded character may start catching up on time away before the first frame; get the queue ready as
+        // soon as its game screen appears.
+        ctx.Tree.NodeAdded += node =>
+        {
+            if (node is not GamesByMalcs.Melvor2.GameMenus.GameView view) return;
+            try { if (KitGame.Of(view) is GamesByMalcs.Melvor2.Game g) _queue?.Attach(g); }
+            catch (Exception e) { ctx.Log("Couldn't get ready for time away: " + e.Message); }
+        };
 
         ctx.Frame += () =>
         {
             double now = Time.GetTicksMsec() / 1000.0;
-            var game = GameAccess.CurrentGame;
+            var game = KitGame.Current;
             _queue.Tick(game, now);
             _inbox.Tick(game, now);
             _window?.Tick();
             _hud.Update(game);
+            if (_queue.State.PageButton) _pageButton.Tick(game, now); else _pageButton.Clear();
         };
         ctx.Log("Ready. F6 opens the queue.");
     }
@@ -45,6 +58,10 @@ public sealed class CourseMod : IMod
         {
             string old = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(ctx.Directory.TrimEnd('\\', '/'))!, "ActionQueue");
             if (!System.IO.Directory.Exists(old)) return;
+            // Only our own old folder: falorfrozen's Action Queue uses the same folder name and must be left alone.
+            string dll = System.IO.Path.Combine(old, "ActionQueue.dll");
+            var info = System.IO.File.Exists(dll) ? System.Diagnostics.FileVersionInfo.GetVersionInfo(dll) : null;
+            if (info == null || (info.CompanyName != "Elocrypt" && info.ProductName?.Contains("Astrolabe") != true)) return;
             foreach (string f in System.IO.Directory.GetFiles(old, "*", System.IO.SearchOption.AllDirectories))
             {
                 string ext = System.IO.Path.GetExtension(f).ToLowerInvariant();

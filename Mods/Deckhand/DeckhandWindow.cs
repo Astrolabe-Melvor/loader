@@ -38,7 +38,7 @@ sealed class DeckhandWindow
         _ranchState.CustomMinimumSize = new Vector2(760, 0);
         ranch.AddChild(_ranchState);
         _pet = Check("Pet animals when they want it", c => c.Pet = _pet!.ButtonPressed);
-        _petNow = Kit.Btn("Pet all now", () => { if (GameAccess.CurrentGame is Game g) { var r = Hand.Ranch(g); r?.PetAllAnimals(); Refresh(); } });
+        _petNow = Kit.Btn("Pet all now", () => { if (KitGame.Current is Game g) { var r = Hand.Ranch(g); r?.PetAllAnimals(); Refresh(); } });
         ranch.AddChild(Kit.Row(_pet, Kit.Spacer(), _petNow));
         _repair = Check("Repair enclosures when maintenance drops below", c => c.Repair = _repair!.ButtonPressed);
         _below = Kit.Spin(new SpinBox { MinValue = 1, MaxValue = 99, Suffix = "%", CustomMinimumSize = new Vector2(100, 0) });
@@ -46,7 +46,7 @@ sealed class DeckhandWindow
         _reserve = Kit.Spin(new SpinBox { MinValue = 0, MaxValue = 1e12, Prefix = "keep at least", Suffix = "GP", CustomMinimumSize = new Vector2(230, 0) });
         _reserve.ValueChanged += v => Set(c => c.GpReserve = (long)v);
         _reserve.TooltipText = "Repairs by rule never take your GP below this.";
-        _repairNow = Kit.Btn("Repair all now", () => { if (GameAccess.CurrentGame is Game g) { _h.DoRanch(g, true); Refresh(); } });
+        _repairNow = Kit.Btn("Repair all now", () => { if (KitGame.Current is Game g) { _h.DoRanch(g, true); Refresh(); } });
         ranch.AddChild(Kit.Row(_repair, _below, _reserve, Kit.Spacer(), _repairNow));
 
         // ---- grain mill ----
@@ -57,7 +57,7 @@ sealed class DeckhandWindow
         _product = new OptionButton { CustomMinimumSize = new Vector2(320, 0) };
         _product.ItemSelected += i =>
         {
-            if (_filling || GameAccess.CurrentGame is not Game g || i < 0 || i >= _recipes.Count) return;
+            if (_filling || KitGame.Current is not Game g || i < 0 || i >= _recipes.Count) return;
             string why = _h.SwitchMill(g, _recipes[(int)i].Active);
             if (why.Length > 0) _millState.Text = why;
             Refresh();
@@ -123,7 +123,7 @@ sealed class DeckhandWindow
 
     void Refresh()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         _filling = true;
         try
         {

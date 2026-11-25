@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Spyglass</AssemblyName>
     <RootNamespace>Astrolabe.Spyglass</RootNamespace>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <Product>Astrolabe Spyglass</Product>
   </PropertyGroup>
 </Project>

@@ -8,6 +8,8 @@ INSTALL
 
 MODS
 Each mod zip extracts into the game folder the same way and lands in "mods\<ModName>\".
+Astrolabe mods also run on Melvor Mod Loader, and Melvor Mod Loader mods run here. Install one loader, not both:
+both use the same "data_MelvorModLoader_windows_x86_64" folder so mods made for either load on either.
 
 UNINSTALL
 Delete "override.cfg" and the folder "data_MelvorModLoader_windows_x86_64". The game then runs untouched.
@@ -17,7 +19,7 @@ THE MODS MENU (F1)
 - Each mod's version and whether it is working. Hover a status for details.
 - Every mod window and its key; click a key to change it.
 - Updates: once a day it checks GitHub for newer versions and lists them. Nothing is downloaded by itself.
-- Report a bug: copies a report with your versions and the log, ready to paste into GitHub or Discord.
+- Report a bug: copies a report with your versions and the log (AstrolabeLoader.log in the game folder), ready to paste into GitHub or Discord.
 Each mod window has Help and a Tour in its title bar.
 
 UPDATING

@@ -1,5 +1,6 @@
 using Godot;
 using MelvorModLoader;
+using Astrolabe.UI;
 
 namespace Astrolabe.Logbook;
 
@@ -22,7 +23,7 @@ public sealed class LogbookMod : IMod
 
         ctx.Frame += () =>
         {
-            _tracker.Tick(GameAccess.CurrentGame, Time.GetTicksMsec() / 1000.0);
+            _tracker.Tick(KitGame.Current, Time.GetTicksMsec() / 1000.0);
             _window?.Tick();
             _panel.Update();
         };

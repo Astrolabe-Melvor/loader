@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using Godot;
-using MelvorModLoader;
 
 namespace Astrolabe.UI;
 
@@ -12,9 +11,9 @@ static class Fonts
     {
         var files = new List<string>();
         try { Walk("res://", files, 0); }
-        catch (Exception e) { Log.Write("Kit: font search failed: " + e.Message); }
+        catch (Exception e) { KitLog.Write("Kit: font search failed: " + e.Message); }
 
-        Log.Write("Kit: fonts in the game pack: " + string.Join(", ", files));
+        KitLog.Write("Kit: fonts in the game pack: " + string.Join(", ", files));
         // The game ships its UI face as "Default" (Assets/Fonts/Default/Static/Default_<Weight>.ttf).
         body = Load(files, "Default_Regular", "Default_Medium", "FiraSans-Regular", "DefaultVariableFont");
         head = Load(files, "Default_Bold", "Default_SemiBold", "Default_ExtraBold", "FiraSansCondensed-Bold", "Default_Black");
@@ -33,7 +32,7 @@ static class Fonts
                 string stem = file.Contains('.') ? file[..file.IndexOf('.')] : file;
                 if (!stem.Equals(want, StringComparison.OrdinalIgnoreCase)) continue;
                 Font? exact = ResourceLoader.Load<Font>(f);
-                if (exact != null) { Log.Write("Kit font: " + f); return exact; }
+                if (exact != null) { KitLog.Write("Kit font: " + f); return exact; }
             }
         foreach (string want in names)
             foreach (string f in files)
@@ -45,7 +44,7 @@ static class Fonts
                 if (styled) continue;
                 if (want == "FiraSans" && file.StartsWith("FiraSansCondensed", StringComparison.OrdinalIgnoreCase)) continue;
                 Font? font = ResourceLoader.Load<Font>(f);
-                if (font != null) { Log.Write("Kit font: " + f); return font; }
+                if (font != null) { KitLog.Write("Kit font: " + f); return font; }
             }
         return null;
     }

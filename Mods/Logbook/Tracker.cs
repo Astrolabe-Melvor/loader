@@ -12,6 +12,7 @@ using GamesByMalcs.Melvor2.Entities;
 using GamesByMalcs.Melvor2.Entities.Combat;
 using GamesByMalcs.Melvor2.EventBus;
 using MelvorModLoader;
+using Astrolabe.UI;
 
 namespace Astrolabe.Logbook;
 
@@ -408,7 +409,7 @@ public sealed class Tracker
     /// <summary>Ends this session (keeps it under Past sessions) and starts a new one.</summary>
     public void Restart()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         Save();
         Archive(Session);
         Session = new Session { Character = Session.Character, StartedUtc = DateTime.UtcNow, LastUtc = DateTime.UtcNow };

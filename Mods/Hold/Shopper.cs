@@ -11,6 +11,7 @@ using GamesByMalcs.Melvor2.Data.Currencies;
 using GamesByMalcs.Melvor2.Data.Items;
 using GamesByMalcs.Melvor2.Entities.Shop;
 using MelvorModLoader;
+using Astrolabe.UI;
 
 namespace Astrolabe.Hold;
 

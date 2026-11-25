@@ -44,7 +44,7 @@ sealed class QueueHud
         _count.MouseFilter = Control.MouseFilterEnum.Ignore;
         _count.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         _fold = new Button { Text = "–", Flat = true, Theme = Kit.Theme, CustomMinimumSize = new Vector2(24, 20), FocusMode = Control.FocusModeEnum.None };
-        _fold.Pressed += () => { _queue.SetOption(s => s.HudMin = !s.HudMin); Update(GameAccess.CurrentGame, force: true); };
+        _fold.Pressed += () => { _queue.SetOption(s => s.HudMin = !s.HudMin); Update(KitGame.Current, force: true); };
         var head = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         head.AddThemeConstantOverride("separation", 8);
         head.AddChild(title);

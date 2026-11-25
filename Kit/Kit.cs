@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using Godot;
-using MelvorModLoader;
 
 namespace Astrolabe.UI;
 
@@ -9,7 +8,7 @@ namespace Astrolabe.UI;
 /// The shared look: the game's own UI textures and fonts, so mod windows read as part of the game.
 /// Use <see cref="Theme"/> on a window's root, or the helpers for one-off controls.
 /// </summary>
-public static class Kit
+static class Kit
 {
     // Game textures (res:// paths inside the game's pack). Each has a 9-slice margin in texture pixels.
     public const string Panel = "res://Assets/UI/Textures/TEX_Crafting_14.png";
@@ -43,28 +42,33 @@ public static class Kit
     public static readonly Color RowColor = Color.FromHtml("#2a2a2a");
     public static readonly Color Night = Color.FromHtml("#141a1f");
 
-    static readonly Dictionary<string, Texture2D?> s_tex = new();
+    // Textures, fonts and shrunk icons are the same for every mod, so all copies of the kit share them.
+    static Dictionary<string, Texture2D?> s_tex => Shared.Get("tex", () => new Dictionary<string, Texture2D?>());
     static Theme? s_theme;
 
     /// <summary>Body and heading fonts: the game's own "Default" face (Regular and Bold) when found.</summary>
-    public static Font BodyFont { get; private set; } = ThemeDB.FallbackFont;
-    public static Font HeadFont { get; private set; } = ThemeDB.FallbackFont;
+    public static Font BodyFont => Fonts2()[0];
+    public static Font HeadFont => Fonts2()[1];
 
-    internal static void Init()
+    // [body, heading], found once for every mod (searching the pack is slow).
+    static Font[] Fonts2() => Shared.Get("fonts", () =>
     {
         Fonts.Find(out Font? body, out Font? head);
         Font fallback = ThemeDB.GetProjectTheme()?.DefaultFont ?? ThemeDB.FallbackFont;
-        BodyFont = body ?? fallback;
-        HeadFont = head ?? BodyFont;   // never fake-embolden: Godot's synthetic bold looks scratched
-        Log.Write($"Kit fonts: body {(body != null ? "game" : "fallback")}, head {(head != null ? "game" : "same as body")}");
-    }
+        KitLog.Write($"Kit fonts: body {(body != null ? "game" : "fallback")}, head {(head != null ? "game" : "same as body")}");
+        // never fake-embolden: Godot's synthetic bold looks scratched
+        return new[] { body ?? fallback, head ?? body ?? fallback };
+    });
+
+    /// <summary>Finds the fonts now rather than on the first window.</summary>
+    public static void Init() => Fonts2();
 
     /// <summary>A texture from the game's pack, or null if this game version does not have it.</summary>
     public static Texture2D? Tex(string path)
     {
         if (s_tex.TryGetValue(path, out Texture2D? t)) return t;
         t = ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
-        if (t == null) Log.Write("Kit: texture missing, using a flat colour: " + path);
+        if (t == null) KitLog.Write("Kit: texture missing, using a flat colour: " + path);
         return s_tex[path] = t;
     }
 
@@ -92,7 +96,7 @@ public static class Kit
         return b;
     }
 
-    static readonly Dictionary<string, Texture2D> s_scaled = new();
+    static Dictionary<string, Texture2D> s_scaled => Shared.Get("scaled", () => new Dictionary<string, Texture2D>());
 
     static Texture2D Scaled(string path, Texture2D tex, float scale)
     {
@@ -107,7 +111,7 @@ public static class Kit
             img.Resize(Mathf.Max(1, (int)(img.GetWidth() * scale)), Mathf.Max(1, (int)(img.GetHeight() * scale)), Image.Interpolation.Lanczos);
             result = ImageTexture.CreateFromImage(img);
         }
-        catch (Exception e) { Log.Write($"Kit: could not scale {path}: {e.Message}"); }
+        catch (Exception e) { KitLog.Write($"Kit: could not scale {path}: {e.Message}"); }
         return s_scaled[key] = result;
     }
 
@@ -252,7 +256,7 @@ public static class Kit
 
     // ---- icons ----
 
-    static readonly Dictionary<ulong, Texture2D> s_icons = new();
+    static Dictionary<ulong, Texture2D> s_icons => Shared.Get("icons", () => new Dictionary<ulong, Texture2D>());
 
     /// <summary>A copy of a game icon shrunk to <paramref name="size"/> pixels, for lists and tables. Cached.</summary>
     public static Texture2D? Icon(Texture2D? source, int size = 20)

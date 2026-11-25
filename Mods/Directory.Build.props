@@ -8,6 +8,10 @@
     <GenerateDependencyFile>false</GenerateDependencyFile>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The UI kit is compiled into each mod, so a mod runs on Astrolabe Loader or Melvor Mod Loader alike. -->
+    <Compile Include="$(MSBuildThisFileDirectory)..\Kit\*.cs" Link="Kit\%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
     <Reference Include="MelvorModLoader"><HintPath>$(LoaderOut)\MelvorModLoader.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="GodotSharp"><HintPath>$(GameData)\GodotSharp.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="GamesByMalcs.Melvor2"><HintPath>$(GameData)\GamesByMalcs.Melvor2.dll</HintPath><Private>false</Private></Reference>

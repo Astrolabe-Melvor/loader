@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
+using System.Linq;
+using System.Text.Json.Nodes;
 using Godot;
 
 namespace Astrolabe.UI;
@@ -12,7 +13,7 @@ namespace Astrolabe.UI;
 /// The window fits its content but never the screen's edges (the body scrolls instead), can be resized from the
 /// corner grip (remembered per window), and follows the mod window size set in the Mods menu.
 /// </summary>
-public sealed partial class KitWindow
+sealed partial class KitWindow
 {
     readonly CanvasLayer _layer;
     readonly Label _title;
@@ -26,7 +27,8 @@ public sealed partial class KitWindow
     Vector2 _resizeFrom, _sizeFrom;
 
     // Windows stack in the order they were last opened or clicked (canvas layers 64 and up; Godot caps them at 128).
-    static readonly System.Collections.Generic.List<KitWindow> s_stack = new();
+    // Every mod's windows, bottom to top, so clicking one brings it above the others whichever mod made them.
+    static List<CanvasLayer> Stack => Shared.Get("stack", () => new List<CanvasLayer>());
     static readonly System.Collections.Generic.List<KitWindow> s_all = new();
     static bool s_guard, s_wasDown;
 
@@ -373,7 +375,7 @@ public sealed partial class KitWindow
     public void Free()
     {
         EndTour();
-        s_stack.Remove(this);
+        Stack.Remove(_layer);
         s_all.Remove(this);
         WindowPrefs.ScaleChanged -= OnScale;
         _layer.QueueFree();
@@ -398,10 +400,12 @@ public sealed partial class KitWindow
     /// <summary>Puts this window above every other kit window.</summary>
     public void BringToFront()
     {
-        if (s_stack.Count > 0 && s_stack[^1] == this) return;
-        s_stack.Remove(this);
-        s_stack.Add(this);
-        for (int i = 0; i < s_stack.Count; i++) s_stack[i]._layer.Layer = Mathf.Min(64 + i, 127);
+        List<CanvasLayer> stack = Stack;
+        stack.RemoveAll(l => !GodotObject.IsInstanceValid(l));
+        if (stack.Count > 0 && stack[^1] == _layer) return;
+        stack.Remove(_layer);
+        stack.Add(_layer);
+        for (int i = 0; i < stack.Count; i++) stack[i].Layer = Mathf.Min(64 + i, 127);
     }
 
     Vector2 _grab;   // where in the window the mouse grabbed it
@@ -428,72 +432,114 @@ public sealed partial class KitWindow
     }
 }
 
-/// <summary>Mod window settings shared by every mod: the size scale (Mods menu) and each window's hand-set size.
-/// Saved in mods\windows.json.</summary>
-public static class WindowPrefs
+/// <summary>
+/// Mod window settings shared by every mod: the size scale (Mods menu), each window's hand-set size and place, and
+/// which windows' tours were offered. Saved in mods\windows.json. Every copy of the kit uses the same document.
+/// </summary>
+static class WindowPrefs
 {
-    sealed class Data
+    static string FilePath => Path.Combine(KitPaths.Mods, "windows.json");
+    static JsonObject D => Shared.Get("prefs", Load);
+    static List<Action> ScaleHandlers => Shared.Get("scaleChanged", () => new List<Action>());
+
+    /// <summary>The scale changed, or every window was reset (refit and recentre).</summary>
+    public static event Action? ScaleChanged
     {
-        public float Scale { get; set; } = 1f;
-        public Dictionary<string, float[]> Sizes { get; set; } = new();
-        public Dictionary<string, float[]> Positions { get; set; } = new();
+        add { if (value != null) ScaleHandlers.Add(value); }
+        remove { if (value != null) ScaleHandlers.Remove(value); }
     }
 
-    static Data? s_data;
-    // Not cached until the loader knows where the mods folder is.
-    static Data D => s_data ?? (MelvorModLoader.Startup.ModsFolder.Length == 0 ? new Data() : s_data = Load());
-    static string File => Path.Combine(MelvorModLoader.Startup.ModsFolder, "windows.json");
-
-    public static event Action? ScaleChanged;
+    static void RaiseScale()
+    {
+        foreach (Action a in ScaleHandlers.ToArray())
+            try { a(); } catch (Exception e) { KitLog.Write("Kit: window refit failed: " + e.Message); }
+    }
 
     /// <summary>Mod windows' size on top of the game's own UI scale: 0.7 to 1.5.</summary>
-    public static float Scale => Math.Clamp(D.Scale, 0.7f, 1.5f);
+    public static float Scale => Math.Clamp((float)Num(D["Scale"], 1), 0.7f, 1.5f);
 
     public static void SetScale(float scale)
     {
-        Data d = D;
-        d.Scale = Math.Clamp(scale, 0.7f, 1.5f);
+        D["Scale"] = (double)Math.Clamp(scale, 0.7f, 1.5f);   // doubles: what JSON numbers read back as
         Save();
-        ScaleChanged?.Invoke();
+        RaiseScale();
     }
 
-    public static Vector2? SizeOf(string window) =>
-        D.Sizes.TryGetValue(window, out float[]? s) && s.Length == 2 ? new Vector2(s[0], s[1]) : null;
-
-    public static void SetSize(string window, Vector2? size)
-    {
-        if (size is Vector2 v) D.Sizes[window] = new[] { v.X, v.Y };
-        else D.Sizes.Remove(window);
-        Save();
-    }
-
-    public static Vector2? PositionOf(string window) =>
-        D.Positions.TryGetValue(window, out float[]? p) && p.Length == 2 ? new Vector2(p[0], p[1]) : null;
-
-    public static void SetPosition(string window, Vector2 at)
-    {
-        D.Positions[window] = new[] { at.X, at.Y };
-        Save();
-    }
+    public static Vector2? SizeOf(string window) => Pair("Sizes", window);
+    public static void SetSize(string window, Vector2? size) => SetPair("Sizes", window, size);
+    public static Vector2? PositionOf(string window) => Pair("Positions", window);
+    public static void SetPosition(string window, Vector2 at) => SetPair("Positions", window, at);
 
     /// <summary>Every window back to fitting its content, centred on screen.</summary>
     public static void ResetSizes()
     {
-        D.Sizes.Clear();
-        D.Positions.Clear();
+        D["Sizes"] = new JsonObject();
+        D["Positions"] = new JsonObject();
         Save();
-        ScaleChanged?.Invoke();
+        RaiseScale();
     }
 
-    static Data Load()
+    /// <summary>True once the window's tour was offered (taken, or the window closed).</summary>
+    public static bool Toured(string window) => List("Toured").Any(n => n?.GetValue<string>() == window);
+
+    public static void MarkToured(string window)
     {
-        try { return System.IO.File.Exists(File) ? JsonSerializer.Deserialize<Data>(System.IO.File.ReadAllText(File)) ?? new() : new(); }
-        catch { return new(); }
+        if (Toured(window)) return;
+        List("Toured").Add(window);
+        Save();
+    }
+
+    static double Num(JsonNode? n, double fallback)
+    {
+        try { return n?.GetValue<double>() ?? fallback; } catch { return fallback; }
+    }
+
+    static JsonObject Obj(string name)
+    {
+        if (D[name] is JsonObject o) return o;
+        var made = new JsonObject();
+        D[name] = made;
+        return made;
+    }
+
+    static JsonArray List(string name)
+    {
+        if (D[name] is JsonArray a) return a;
+        var made = new JsonArray();
+        D[name] = made;
+        return made;
+    }
+
+    static Vector2? Pair(string group, string window) =>
+        Obj(group)[window] is JsonArray a && a.Count == 2 ? new Vector2((float)Num(a[0], 0), (float)Num(a[1], 0)) : null;
+
+    static void SetPair(string group, string window, Vector2? v)
+    {
+        if (v is Vector2 p) Obj(group)[window] = new JsonArray((double)p.X, (double)p.Y);
+        else Obj(group).Remove(window);
+        Save();
+    }
+
+    static JsonObject Load()
+    {
+        JsonObject d;
+        try { d = File.Exists(FilePath) ? JsonNode.Parse(File.ReadAllText(FilePath)) as JsonObject ?? new() : new(); }
+        catch { d = new(); }
+        // Tours offered before the kit kept track here were noted in loader-state.json (Astrolabe Loader 0.3).
+        if (d["Toured"] == null)
+            try
+            {
+                string old = Path.Combine(KitPaths.Mods, "loader-state.json");
+                if (File.Exists(old) && JsonNode.Parse(File.ReadAllText(old))?["Toured"] is JsonArray t)
+                    d["Toured"] = JsonNode.Parse(t.ToJsonString());
+            }
+            catch { }
+        return d;
     }
 
     static void Save()
     {
-        try { System.IO.File.WriteAllText(File, JsonSerializer.Serialize(D)); }
-        catch { }
+        try { File.WriteAllText(FilePath, D.ToJsonString()); }
+        catch (Exception e) { KitLog.Write("Kit: could not save windows.json: " + e.Message); }
     }
 }

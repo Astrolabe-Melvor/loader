@@ -16,6 +16,8 @@ Tested on game version 0.11.7 (Steam, Windows).
 To update, close the game and extract the new zips over the old ones; your settings are kept. The Mods menu says when there is an update.
 To remove, delete `override.cfg` and the folder `data_MelvorModLoader_windows_x86_64`. The `mods` folder can stay.
 
+**Already using Melvor Mod Loader?** Keep it: extract only the mod zips you want (not the Loader zip). Astrolabe's mods run on it too; Astrolabe Loader adds the update check, Report a bug and mod health to the Mods menu.
+
 | Mod | Key | What it does |
 |---|---|---|
 | Course | F6 | Queue actions one after another, each until a goal: a level, an amount, a time. Plans whole items, runs slayer tasks, puts on each step's gear. |
@@ -81,26 +83,35 @@ public sealed class Hello : IMod
 }
 ```
 
-Put the project in `Mods\Hello\Hello.csproj` and `Install.cmd` builds it into the game. `Mods\Directory.Build.props` sets up the references.
+Put the project in `Mods\Hello\Hello.csproj` and `Install.cmd` builds it into the game. `Mods\Directory.Build.props` sets up the references and compiles the UI kit (`Kit\*.cs`) into the mod.
 
 ### API
+
+The loader API (`MelvorModLoader` namespace) is the same as falorfrozen's Melvor Mod Loader:
 
 | | |
 |---|---|
 | `ModContext` | `Name`, `Directory`, `Tree`, `Log()`, `Frame` event, `AddWindow(title, toggle, key)` |
 | `GameAccess` | `CurrentGame`, `FindGameView()`, `FindNode<T>()`, `IsComputingOffline` |
-| `Astrolabe.UI.Kit` | `Theme`, `Box()`, `Label()`, `Heading()`, `Btn()`, `Row()`, palette colours, game fonts |
-| `Astrolabe.UI.KitWindow` | game-framed window with title ribbon, drag, `Body`, `HeaderExtras`, `Open/Close/Toggle`, `SetHelp(bbcode)`, `SetTour(steps)` |
-| `Astrolabe.UI.TourStep` | `(title, text, target, before)`: one stop on a window's tour; `target` returns the control to outline |
-| `Messages` | `Subscribe(topic, handler)`, `Publish(topic, data)`: mods talk without referencing each other |
+| `ModWindow` | `Title`, `Key`, `KeyLabel`, `Changed` |
 
-Loader topics: `loader.gameupdated` (the game's new version, once at start after an update).
+The UI kit (`Astrolabe.UI`) is source code compiled into each mod, not part of the loader. So a mod built with it runs on Astrolabe Loader and on Melvor Mod Loader alike, and needs no other file. Copies of the kit in different mods share their state (messages, window settings, which window is on top) through named app-domain data, see `Kit\Shared.cs`.
+
+| | |
+|---|---|
+| `Kit` | `Theme`, `Box()`, `Label()`, `Heading()`, `Btn()`, `Row()`, `Rows()`, `Icon()`, palette colours, game fonts |
+| `KitWindow` | game-framed window with title ribbon, drag, `Body`, `HeaderExtras`, `Open/Close/Toggle`, `SetHelp(bbcode)`, `SetTour(steps)` |
+| `TourStep` | `(title, text, target, before)`: one stop on a window's tour; `target` returns the control to outline |
+| `Messages` | `Subscribe(topic, handler)`, `Publish(topic, data)`: mods talk without referencing each other |
+| `KitGame` | `Current`: the open character's game, cached (cheap every frame on either loader) |
+
+Astrolabe Loader topics: `loader.gameupdated` (the game's new version, once at start after an update).
 
 Theme variations: `Heading`, `Dim`, `ActionButton`, `Card`, `Ribbon`.
 
 ### Compatibility
 
-The `MelvorModLoader` namespace types (`IMod`, `ModContext`, `GameAccess`, `ModWindow`, `KeyChord`) keep the same names and signatures as falorfrozen's Melvor Mod Loader, so mods built for it load here too. Only one loader can be installed at a time.
+The `MelvorModLoader` namespace types (`IMod`, `ModContext`, `GameAccess`, `ModWindow`, `KeyChord`) keep the same names and signatures as falorfrozen's Melvor Mod Loader, so mods built for it load on Astrolabe Loader, and Astrolabe's mods load on Melvor Mod Loader. Only one loader can be installed at a time. On Melvor Mod Loader, the Astrolabe Loader extras (mod health in the Mods menu, update check, Report a bug, the game-update check) are not there; the mods themselves work the same.
 
 ## License
 

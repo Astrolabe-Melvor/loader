@@ -153,7 +153,7 @@ sealed class SpyglassWindow
         _list.Clear();
         Lookup? d = Data();
         if (d == null) { _status.Text = $"Item data: {Lookup.State}."; return; }
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         string q = _search.Text.Trim();
         var hits = d.Items.Where(kv => q.Length == 0 || kv.Value.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
             .OrderBy(kv => q.Length > 0 && !kv.Value.Name.StartsWith(q, StringComparison.OrdinalIgnoreCase)).ThenBy(kv => kv.Value.Name).Take(300).ToList();
@@ -210,7 +210,7 @@ sealed class SpyglassWindow
         if (!on) { _title.Text = "Pick an item"; _facts.Text = ""; _icon.Texture = null; return; }
 
         Entry e = d!.Items[id!];
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         Item? it = GameItem(game, id!);
         _icon.Texture = it?.Icon;
         _title.Text = e.Name;
@@ -229,7 +229,7 @@ sealed class SpyglassWindow
     void Fill(Tree t, List<Ref> rows, Func<Ref, string[]> cells)
     {
         TreeItem root = t.CreateItem();
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         Lookup? d = Data();
         foreach (Ref r in rows)
         {

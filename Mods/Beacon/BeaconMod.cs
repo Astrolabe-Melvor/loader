@@ -1,5 +1,6 @@
 using Godot;
 using MelvorModLoader;
+using Astrolabe.UI;
 
 namespace Astrolabe.Beacon;
 
@@ -15,7 +16,7 @@ public sealed class BeaconMod : IMod
     {
         _watcher = new Watcher(ctx.Directory, ctx.Log);
         _toasts = new Toasts(ctx.Directory);
-        _watcher.Raised += (a, r) => _toasts.Show(a, r, _watcher.Options, GameAccess.CurrentGame);
+        _watcher.Raised += (a, r) => _toasts.Show(a, r, _watcher.Options, KitGame.Current);
         // Hold publishes these; Beacon delivers them like its own alerts.
         Messages.Subscribe("hold.bought", d => { if (d is string t) _watcher.FromMod(Kind.ShopBought, t); });
         Messages.Subscribe("hold.unlocked", d => { if (d is string t) _watcher.FromMod(Kind.ShopUnlocked, t); });
@@ -24,7 +25,7 @@ public sealed class BeaconMod : IMod
         Messages.Subscribe("logbook.rare", d => { if (d is string t) _watcher.FromMod(Kind.RareDrop, t); });
         _entry = ctx.AddWindow("Beacon", Toggle, Key.F8);
         _entry.Changed += () => _window?.SetKeyLabel(_entry.KeyLabel);
-        ctx.Frame += () => _watcher.Tick(GameAccess.CurrentGame, Time.GetTicksMsec() / 1000.0);
+        ctx.Frame += () => _watcher.Tick(KitGame.Current, Time.GetTicksMsec() / 1000.0);
         ctx.Log("Ready. F8 sets up alerts.");
     }
 

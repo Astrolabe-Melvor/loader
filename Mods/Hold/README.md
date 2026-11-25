@@ -17,6 +17,10 @@ Pick an item, then:
 
 **Sell by my rules now** sells everything the rules allow; the line beside it says what that would be first. **Sell by my rules automatically** does it every 10 seconds while you play. **Locked bank stacks are never sold**, rule or not. **Sell all now** sells one item outright.
 
+## Bury all and Open all
+
+On the Bank tab: bury every buryable item for its currency, or open every chest and pack you can open. A line first says what they would use and give. Locked stacks and what your rules keep are left alone; opening stops when the bank is full.
+
 ## Cleanup
 
 What in your bank is safe to sell, the same list as Astrolabe Tools' Bank cleanup:

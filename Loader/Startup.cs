@@ -101,15 +101,15 @@ namespace MelvorModLoader
         }
     }
 
-    /// <summary>The loader's log file (MelvorModLoader.log in the game folder), started fresh each run.</summary>
+    /// <summary>The loader's log file (AstrolabeLoader.log in the game folder), started fresh each run.</summary>
     public static class Log
     {
         static readonly object s_gate = new();
-        public static string FilePath { get; private set; } = Path.Combine(Path.GetTempPath(), "MelvorModLoader.log");
+        public static string FilePath { get; private set; } = Path.Combine(Path.GetTempPath(), "AstrolabeLoader.log");
 
         internal static void Open(string folder)
         {
-            string file = Path.Combine(folder, "MelvorModLoader.log");
+            string file = Path.Combine(folder, "AstrolabeLoader.log");
             try { File.WriteAllText(file, ""); FilePath = file; }
             catch { try { File.WriteAllText(FilePath, ""); } catch { } }
         }

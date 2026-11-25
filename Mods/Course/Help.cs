@@ -6,6 +6,7 @@ static class Help
 [b]Course[/b] runs your actions one after another: do this until a goal, then that, then the next. The game runs one action at a time; Farming and Ranching keep going on their own next to it.
 
 [b]Add a step[/b]
+From the game: every skill and combat page has a [b]Queue[/b] button in its top-right corner. It opens this tab with that skill and the page's selected recipe (or what's running there) picked, so you only choose the goal.
 Pick a skill and an action, then what "done" means: the bank holds an amount, you gain an amount, a skill reaches a level, it has been done a number of times, or time passes. Every list only offers what fits the action. The green line under the form says what the step will do; a gold line warns about anything that would stop it. [i]Copy what I'm doing[/i] fills in your current action.
 [b]Fastest XP[/b] and [b]Most GP[/b] pick the best action for the skill and switch as you level.
 [b]Slayer tasks[/b] (Combat): fights the highest master's task it can, moves to the next task when one is done, until a number of tasks, a level or a time. [i]Undo[/i] under the step list takes back the last change (an edit, a move, a removal).
@@ -36,5 +37,6 @@ Save queues by name, or copy one as a code (CRS1:...) to share. The wiki's plann
 
 [b]While it runs[/b]
 The small panel shows the current step: drag it anywhere, "–" folds it, click it to open Course. History lists everything the queue did. [i]When the queue waits or ends[/i] sets an action to do meanwhile.
+The queue keeps going while the game catches up on time away: steps that finish move on, with the times in History, and the alerts come when you are back.
 """;
 }

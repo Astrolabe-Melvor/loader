@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Beacon</AssemblyName>
     <RootNamespace>Astrolabe.Beacon</RootNamespace>
-    <Version>0.4.0</Version>
+    <Version>0.4.1</Version>
     <Product>Astrolabe Beacon</Product>
   </PropertyGroup>
 </Project>

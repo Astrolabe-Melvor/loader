@@ -14,6 +14,8 @@ Do one action until a goal is reached, then the next. Built on Astrolabe Loader.
 - **History:** what the queue did, with times, kept between sessions.
 - **Options:** start over at the end; sound and taskbar flash when it finishes, skips a step or pauses; stop combat when the food runs out; pause when the bank is full; corner panel; swap combat loadouts per step; a default combat loadout.
 
+**From the game:** every skill and combat page gets a **Queue** button in its top-right corner. It opens Add a step with that skill and the page's selected recipe (or what's running there) picked. It can be switched off under Options.
+
 ## The table
 
 Drag rows to reorder, double-click (or Edit) to change a step. Tick the box on several rows to move, drag or remove them together; **Tick all** ticks every step. **Remove finished** clears done and skipped steps, and the option "Take steps off the list once they reach their goal" does it as you go (not while the queue loops). Item goals show the time left at the current pace. While the queue runs the tabs fold away; click one to bring it back.
@@ -22,4 +24,4 @@ Drag rows to reorder, double-click (or Edit) to change a step. Tick the box on s
 
 **Idle action:** what to do while a step waits for materials, and after the queue ends.
 
-The game runs one action at a time, and so does the queue: one step after another. The queue runs while the game is open. Offline progress keeps doing whatever was running when you closed the game.
+The game runs one action at a time, and so does the queue: one step after another. The queue also runs while the game catches up on time away: steps that reach their goal while you are gone move on to the next, and History shows when each one happened. Alerts and sounds wait until you are back. "Slayer rules all the time" and the Thieving and Agility food switch only run while the game is open.

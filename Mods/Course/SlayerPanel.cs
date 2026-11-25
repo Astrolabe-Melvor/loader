@@ -55,8 +55,8 @@ sealed class SlayerPanel
 
         _sel = Kit.Label("Pick a master.", null, 13, "Dim");
         _sel.CustomMinimumSize = new Vector2(200, 0);
-        _extend = Kit.Btn("Extend", () => Do(t => Slayer.Extend(GameAccess.CurrentGame!, t), "extended"));
-        _reroll = Kit.Btn("Reroll", () => Do(t => Slayer.Reroll(GameAccess.CurrentGame!, t), "rerolled"));
+        _extend = Kit.Btn("Extend", () => Do(t => Slayer.Extend(KitGame.Current!, t), "extended"));
+        _reroll = Kit.Btn("Reroll", () => Do(t => Slayer.Reroll(KitGame.Current!, t), "rerolled"));
         _fight = Kit.Btn("Fight it now", Fight);
         _fight.TooltipText = "Start fighting this task's monster (outside the queue).";
         _autoExtend = new CheckBox { Text = "Extend its tasks by rule" };
@@ -98,7 +98,7 @@ sealed class SlayerPanel
 
     public void Refresh()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game == null) return;
         var monsters = Catalog.Skills(game).Where(s => Gear.IsCombat(game, s.Id)).SelectMany(s => s.Actions)
             .Where(a => a.Ref.Area != a.Ref.Target)
@@ -111,7 +111,7 @@ sealed class SlayerPanel
 
     void Fill()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game == null) return;
         _filling = true;
         try
@@ -198,7 +198,7 @@ sealed class SlayerPanel
 
     void Fight()
     {
-        if (Current() is not SlayerTask t || t.Fight == null || GameAccess.CurrentGame is not Game game) return;
+        if (Current() is not SlayerTask t || t.Fight == null || KitGame.Current is not Game game) return;
         string why = Starter.Start(game, t.Fight);
         if (why.Length > 0) _q.Note($"Slayer: can't fight {t.EnemyName}: {why}");
     }

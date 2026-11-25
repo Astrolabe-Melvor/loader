@@ -112,11 +112,24 @@ sealed class HoldWindow
 
         _due = Kit.Label("", null, 13, "Dim");
         _due.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        _sellRules = Kit.Btn("Sell by my rules now", () => { if (GameAccess.CurrentGame is Game g) _k.SellByRules(g, auto: false); }, action: true);
+        _sellRules = Kit.Btn("Sell by my rules now", () => { if (KitGame.Current is Game g) _k.SellByRules(g, auto: false); }, action: true);
         _auto = new CheckBox { Text = "Sell by my rules automatically" };
         _auto.TooltipText = "Checked every 10 seconds while you play. Locked bank stacks are never sold.";
         _auto.Toggled += on => _k.SetAuto(on);
         bank.AddChild(Kit.Row(_due, _auto, _sellRules));
+
+        // Bury all and Open all: a confirm line first, saying what they would use and give.
+        Button buryBtn = WithTip(Kit.Btn("Bury all", () => AskBulk(bury: true)), "Bury every buryable item (bones and the like) for its currency. Locked stacks and what your rules keep are left.");
+        Button openBtn = WithTip(Kit.Btn("Open all", () => AskBulk(bury: false)), "Open every chest and pack you can open. Locked stacks and what your rules keep are left; stops when the bank is full.");
+        _bulkMsg = Kit.Label("", null, 13, "Dim");
+        _bulkMsg.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _bulkMsg.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        _bulkMsg.CustomMinimumSize = new Vector2(400, 0);
+        _bulkYes = Kit.Btn("Yes", DoBulk, action: true);
+        _bulkNo = Kit.Btn("Cancel", () => { _bulkLines = null; _bulkYes.Visible = _bulkNo.Visible = false; Say(_bulkMsg, ""); });
+        _bulkYes.Visible = _bulkNo.Visible = false;
+        _bulkMsg.Visible = false;
+        bank.AddChild(Kit.Row(buryBtn, openBtn, _bulkMsg, _bulkYes, _bulkNo));
 
         // ---- shop ----
         var shop = Panel(1);
@@ -183,7 +196,7 @@ sealed class HoldWindow
         _autoBuy = new CheckBox { Text = "Buy by my shop rules automatically" };
         _autoBuy.TooltipText = "Checked every 10 seconds while you play. Never spends below your reserves or an item's keep amount.";
         _autoBuy.Toggled += on => _k.SetAutoBuy(on);
-        _buyRules = Kit.Btn("Buy by my rules now", () => { if (GameAccess.CurrentGame is Game g) Report(_k.Shop.BuyByRules(g, auto: false)); }, action: true);
+        _buyRules = Kit.Btn("Buy by my rules now", () => { if (KitGame.Current is Game g) Report(_k.Shop.BuyByRules(g, auto: false)); }, action: true);
         shop.AddChild(Kit.Row(_buyDue, _ruleAll, _autoBuy, _buyRules));
 
         // ---- history ----
@@ -246,7 +259,7 @@ sealed class HoldWindow
         var timer = new Godot.Timer { WaitTime = 3, Autostart = true };
         timer.Timeout += () =>
         {
-            if (_win.Visible && _tab == 1 && GameAccess.CurrentGame is Game g) RefreshShop(g);
+            if (_win.Visible && _tab == 1 && KitGame.Current is Game g) RefreshShop(g);
             if (_win.Visible && _tab == 3 && !Cleanup.Ready) FillCleanup();   // the item data is still downloading, or retrying
         };
         _win.Root.AddChild(timer);
@@ -258,6 +271,7 @@ sealed class HoldWindow
             new TourStep("Your bank", "Every item, most valuable first. Search, or show only items with or without a rule. Pick a row to work on it.", () => _table, () => Show(0)),
             new TourStep("Rules", "Give the picked item a rule: keep some and sell the rest, or junk (always sell it all). [b]Sell all now[/b] sells it straight away.", () => _rule.GetParent() as Control, () => Show(0)),
             new TourStep("Selling", "[b]Sell by my rules now[/b] applies every rule once. Tick the box to do it every 10 seconds while you play. Locked bank stacks are never sold.", () => _sellRules.GetParent() as Control, () => Show(0)),
+            new TourStep("Bury all, Open all", "Bury every buryable item for its currency, or open every chest and pack. A line says what they'd use and give before anything happens.", () => buryBtn.GetParent() as Control, () => Show(0)),
             new TourStep("Cleanup", "What in your bank is safe to sell: spare copies of gear, gear you've outgrown, and items nothing uses. Tick them, then sell now or give them a rule.", () => _clean, () => Show(3)),
             new TourStep("The shop", "Every purchase you can see. Pick one to buy it, or give it a rule like \"buy as soon as I can\".", () => _shop, () => Show(1)),
             new TourStep("Buy order and reserves", "Which rules buy first when money is short, and how much gold or other currency to always keep back.", () => _order.GetParent() as Control, () => Show(1)),
@@ -299,7 +313,7 @@ sealed class HoldWindow
 
     void Refresh()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game == null) { _summary.Text = "Load a character to see the bank."; return; }
         _auto.SetPressedNoSignal(_k.Book.Auto);
         _autoBuy.SetPressedNoSignal(_k.Book.AutoBuy);
@@ -342,7 +356,7 @@ sealed class HoldWindow
 
     void Fill()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         _table.Clear();
         TreeItem root = _table.CreateItem();
         string q = _search.Text.Trim();
@@ -397,7 +411,7 @@ sealed class HoldWindow
 
     void SellSelected()
     {
-        if (_selected == null || GameAccess.CurrentGame is not Game game) return;
+        if (_selected == null || KitGame.Current is not Game game) return;
         Row? r = _rows.FirstOrDefault(x => x.Item.Id == _selected);
         if (r != null) _k.Sell(game, r.Item, r.Qty);
     }
@@ -617,7 +631,7 @@ sealed class HoldWindow
     void UpdateBuyButton()
     {
         Offer? o = _offers.FirstOrDefault(x => x.P.Id == _offer);
-        if (o == null || GameAccess.CurrentGame is not Game game || Shopper.Shop(game) is not { } shop) { _buyNow.Disabled = true; return; }
+        if (o == null || KitGame.Current is not Game game || Shopper.Shop(game) is not { } shop) { _buyNow.Disabled = true; return; }
         int qty = (int)_buyQty.Value;
         int can = o.State is State.Owned or State.Locked ? 0 : _k.Shop.Affordable(shop, o.P);
         _buyNow.Disabled = can < qty;
@@ -661,12 +675,44 @@ sealed class HoldWindow
     void BuySelected()
     {
         Offer? o = _offers.FirstOrDefault(x => x.P.Id == _offer);
-        if (o == null || GameAccess.CurrentGame is not Game game) return;
+        if (o == null || KitGame.Current is not Game game) return;
         string? err = _k.Shop.Buy(game, o.P, (int)_buyQty.Value);
         Say(_buyMsg, err ?? $"Bought {o.Name}.");
     }
 
     Button _cleanSell = null!, _cleanRule = null!, _cleanRetry = null!;
+
+    Label _bulkMsg = null!;
+    Button _bulkYes = null!, _bulkNo = null!;
+    List<BulkLine>? _bulkLines;
+    bool _bulkBury;
+
+    void AskBulk(bool bury)
+    {
+        if (KitGame.Current is not Game game) return;
+        _bulkBury = bury;
+        _bulkLines = bury ? Bulk.Buryable(game, _k) : Bulk.Openable(game, _k);
+        if (_bulkLines.Count == 0)
+        {
+            _bulkYes.Visible = _bulkNo.Visible = false;
+            Say(_bulkMsg, bury ? "Nothing to bury." : "Nothing to open.");
+            return;
+        }
+        string names = string.Join(", ", _bulkLines.Take(5).Select(l => $"{l.Qty:N0} {l.Name}")) + (_bulkLines.Count > 5 ? $" and {_bulkLines.Count - 5} more" : "");
+        string gain = bury ? " for " + string.Join(", ", _bulkLines.GroupBy(l => l.Currency).Select(g => $"{g.Sum(l => l.Gain):N0} {g.Key}")) : "";
+        Say(_bulkMsg, (bury ? "Bury " : "Open ") + names + gain + "?");
+        _bulkYes.Text = bury ? "Bury" : "Open";
+        _bulkYes.Visible = _bulkNo.Visible = true;
+    }
+
+    void DoBulk()
+    {
+        _bulkYes.Visible = _bulkNo.Visible = false;
+        if (KitGame.Current is not Game game || _bulkLines == null) return;
+        Say(_bulkMsg, _bulkBury ? Bulk.BuryAll(game, _bulkLines) : Bulk.OpenAll(game, _bulkLines));
+        _bulkLines = null;
+        Refresh();
+    }
 
     static void Say(Label l, string text) { l.Text = text; l.Visible = text.Length > 0; }
 
@@ -674,7 +720,7 @@ sealed class HoldWindow
 
     void FillCleanup()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         _clean.Clear();
         TreeItem root = _clean.CreateItem();
         if (game == null) { _cleanSummary.Text = "Load a character to see the bank."; _cleanRows.Clear(); UpdateCleanButtons(); return; }
@@ -739,7 +785,7 @@ sealed class HoldWindow
 
     void SellTicked()
     {
-        if (GameAccess.CurrentGame is not Game game) return;
+        if (KitGame.Current is not Game game) return;
         int n = 0;
         long gp = 0;
         foreach (CleanRow r in _cleanRows.Where(r => _cleanTicked.Contains(r.Bank.Item.Id)).ToList())

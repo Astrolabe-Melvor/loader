@@ -198,7 +198,7 @@ sealed class BeaconWindow
     void Preview(Kind k)
     {
         Rule r = _w.Options.Of(k);
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         AudioStream? skill = game?.LeveledEntities.FirstOrDefault()?.LevelUpNotificationSound;
         _toasts.Sounds.Play(r.Chime ?? Toasts.DefaultChime(k, _toasts.Sounds), skill, _w.Options.Volume * r.Volume, false);
     }

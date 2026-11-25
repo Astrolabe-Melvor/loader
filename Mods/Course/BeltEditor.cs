@@ -60,7 +60,7 @@ sealed class BeltEditor
     /// <summary>Called when the tab is shown.</summary>
     public void Refresh()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game == null) { _note.Text = "Load a character to set up toolbelts."; return; }
         string? keep = SkillId;
         _skill.Clear();
@@ -76,7 +76,7 @@ sealed class BeltEditor
 
     void FillSets(string? select)
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         string? skill = SkillId;
         _set.Clear();
         if (game == null || skill == null) return;
@@ -119,7 +119,7 @@ sealed class BeltEditor
 
     void New(bool fromNow)
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         string? skill = SkillId;
         if (game == null || skill == null) return;
         int n = _q.State.Belts.Count(b => b.Skill == skill) + 1;
@@ -163,7 +163,7 @@ sealed class BeltEditor
 
     void Wear()
     {
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         if (game == null || _work == null) return;
         string said = Belts.Apply(game, _work);
         _note.Text = said.Length > 0 ? "Put on: " + said + "." : "Everything in this set is already on.";
@@ -175,7 +175,7 @@ sealed class BeltEditor
     {
         foreach (Node n in _grid.GetChildren()) { _grid.RemoveChild(n); n.QueueFree(); }
         _save.Text = _dirty ? "Save set *" : "Save set";
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         string? skill = SkillId;
         bool on = _work != null && game != null && skill != null;
         _save.Disabled = _delete.Disabled = _wear.Disabled = !on;

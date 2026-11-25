@@ -1,5 +1,6 @@
 using Godot;
 using MelvorModLoader;
+using Astrolabe.UI;
 
 namespace Astrolabe.Deckhand;
 
@@ -15,7 +16,7 @@ public sealed class DeckhandMod : IMod
         _hand = new Hand(ctx.Directory, ctx.Log);
         _entry = ctx.AddWindow("Deckhand", Toggle, Key.F3);
         _entry.Changed += () => _window?.SetKeyLabel(_entry.KeyLabel);
-        ctx.Frame += () => _hand.Tick(GameAccess.CurrentGame, Time.GetTicksMsec() / 1000.0);
+        ctx.Frame += () => _hand.Tick(KitGame.Current, Time.GetTicksMsec() / 1000.0);
         ctx.Log("Ready. F3 opens Deckhand.");
     }
 

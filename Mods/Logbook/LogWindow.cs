@@ -192,7 +192,7 @@ sealed class LogWindow
     void Refresh()
     {
         Session s = _t.Session;
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         _rareOnly.SetPressedNoSignal(_t.Options.RareOnly);
         _panelOn.SetPressedNoSignal(_t.Options.Panel);
         if (s.Character.Length == 0) { _head.Text = "Load a character to start a session."; return; }

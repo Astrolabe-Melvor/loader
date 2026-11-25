@@ -99,7 +99,7 @@ sealed class LogPanel
         if (!force && now < _next) return;
         _next = now + 2;
 
-        Game? game = GameAccess.CurrentGame;
+        Game? game = KitGame.Current;
         Session s = _t.Session;
         _panel.Visible = game != null && _t.Options.Panel && s.Character.Length > 0;
         if (!_panel.Visible) return;

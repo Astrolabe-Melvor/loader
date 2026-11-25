@@ -12,6 +12,7 @@ using GamesByMalcs.Melvor2.Entities.Farming;
 using GamesByMalcs.Melvor2.Entities.Ranching;
 using GamesByMalcs.Melvor2.EventLog;
 using MelvorModLoader;
+using Astrolabe.UI;
 
 namespace Astrolabe.Deckhand;
 

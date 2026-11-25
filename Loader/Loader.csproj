@@ -4,7 +4,7 @@
     <AssemblyName>MelvorModLoader</AssemblyName>
     <RootNamespace>MelvorModLoader</RootNamespace>
     <AssemblyVersion>0.1.0.0</AssemblyVersion>
-    <Version>0.3.1</Version>
+    <Version>0.4.0</Version>
     <Product>Astrolabe Loader</Product>
     <Description>Astrolabe Loader: mod loader for Melvor Idle 2.</Description>
     <Copyright>Copyright (c) 2026 Elocrypt</Copyright>
@@ -26,6 +26,10 @@
     <!-- Compile against the game's copies; at runtime they are loaded from the game's data folder. -->
     <Reference Include="GodotSharp"><HintPath>$(GameData)\GodotSharp.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="GamesByMalcs.Melvor2"><HintPath>$(GameData)\GamesByMalcs.Melvor2.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The UI kit is compiled into the loader and into every mod (see Kit\Shared.cs). -->
+    <Compile Include="..\Kit\*.cs" Link="Kit\%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.Reflection.Metadata.MetadataUpdater.IsSupported" Value="false" />

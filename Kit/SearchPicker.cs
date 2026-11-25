@@ -6,13 +6,13 @@ using Godot;
 namespace Astrolabe.UI;
 
 /// <summary>One entry of a <see cref="SearchPicker"/>.</summary>
-public sealed record PickItem(string Id, string Text, Texture2D? Icon = null, bool Dim = false, string Note = "");
+sealed record PickItem(string Id, string Text, Texture2D? Icon = null, bool Dim = false, string Note = "");
 
 /// <summary>
 /// A dropdown with a search box: a button showing the current choice; clicking it opens a list you can type to
 /// filter. For long lists (every item, every Smithing recipe) where a plain dropdown is unusable.
 /// </summary>
-public sealed class SearchPicker
+sealed class SearchPicker
 {
     readonly PopupPanel _popup;
     readonly LineEdit _search;

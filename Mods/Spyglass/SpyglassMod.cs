@@ -1,5 +1,6 @@
 using Godot;
 using MelvorModLoader;
+using Astrolabe.UI;
 
 namespace Astrolabe.Spyglass;
 

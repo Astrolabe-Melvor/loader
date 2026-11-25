@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+- Every mod now runs on Astrolabe Loader or on Melvor Mod Loader (falorfrozen's). The window kit is built into each mod instead of the loader, so update the loader and all mods together. Window sizes, positions, scale and tours move to `mods\windows.json`.
+- Course 0.12.0: the queue keeps going while the game catches up on time away; steps that reach their goal move on, History gets the time each happened, alerts play when you are back. A Queue button on every skill and combat page opens Add a step with that page's action picked (can be turned off in Options). The old Action Queue folder is only moved when it is ours.
+- Hold 0.6.0: Bury all and Open all on the Bank tab, with a confirm line listing what goes. Locked stacks and the amounts your rules keep are left alone.
+- Logbook 0.3.1, Beacon 0.4.1, Spyglass 0.2.1, Anchor 0.2.1, Deckhand 0.2.1: built with the kit inside.
+
 ## 0.3.1
 - Hold 0.5.0: Cleanup tab: spare gear, outgrown gear and unused items in your bank, to sell now or give a rule. Same list as Astrolabe Tools' Bank cleanup.
 - Loader 0.3.1: the tour is offered by a green "Take the tour" button instead of a bar that pushed every window's content down; tables shrink to fit the screen before a window scrolls; one card per mod in the Mods menu; Check now shows its result; Theme preview hidden (mod makers: put a file named `dev` in the mods folder).
