@@ -75,6 +75,8 @@ sealed class QueueWindow
     readonly ActionPicker _idle;
     readonly Label _idleNote, _status;
     int _selected = -1;
+    /// <summary>Ticked rows: Up, Down, Remove and dragging work on all of them at once.</summary>
+    HashSet<int> _ticked = new();
 
     public QueueWindow(Queue queue)
     {
@@ -114,7 +116,8 @@ sealed class QueueWindow
         _do.Changed += OnActionPicked;
         var copyNow = Kit.Btn("Copy what I'm doing", () => _do.UseCurrent());
         copyNow.TooltipText = "Fill in the action your character is doing right now";
-        addBox.AddChild(Kit.Row(Field("Do"), _do.SkillBox, _do.ActionPick.Button, copyNow));
+        HBoxContainer doRow = Kit.Row(Field("Do"), _do.SkillBox, _do.ActionPick.Button, copyNow);
+        addBox.AddChild(doRow);
 
         _untilLabel = Field("until");
         _goal = new OptionButton { CustomMinimumSize = new Vector2(230, 0) };
@@ -200,6 +203,7 @@ sealed class QueueWindow
         _optAlerts = Option("Play a sound and flash the taskbar when the queue finishes, skips a step or pauses", s => s.Alerts, (s, v) => s.Alerts = v);
         _optFood = Option("Stop a combat step when the selected food runs out", s => s.FoodGuard, (s, v) => s.FoodGuard = v);
         _optBank = Option("Pause the queue when the bank is full", s => s.BankGuard, (s, v) => s.BankGuard = v);
+        optBox.AddChild(Option("Take steps off the list once they reach their goal (kept while the queue loops; skipped steps stay so you can see them)", s => s.RemoveFinished, (s, v) => s.RemoveFinished = v));
         _optHud = Option("Show the current step in a small panel while the queue runs (drag it anywhere, \"–\" folds it)", s => s.Hud, (s, v) => s.Hud = v);
         _optGear = Option("Put on each step's gear when it starts: combat loadouts, weapons and stances, and skill toolbelt sets with refills", s => s.AutoGear, (s, v) => s.AutoGear = v);
         _optGear.Toggled += _ => RefreshGearGrid();
@@ -220,29 +224,41 @@ sealed class QueueWindow
         optBox.AddChild(_gearGrid);
 
         // ---- the steps ----
-        _table = MakeTable(new[] { "#", "Do", "Until", "State" }, new[] { 34, 330, 290, 230 }, 1, 230, expandCols: new[] { 1, 2 });
+        // State grows with the window too (it holds the time left), so widening the window shows all of it.
+        _table = MakeTable(new[] { "#", "Do", "Until", "State" }, new[] { 62, 280, 260, 340 }, 1, 230, expandCols: new[] { 1, 2, 3 }, ratios: new[] { 1, 4, 4, 3 });
         _table.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
         _table.ItemSelected += () => _selected = _table.GetSelected()?.GetMetadata(0).AsInt32() ?? -1;
+        _table.ItemEdited += () =>
+        {
+            TreeItem? it = _table.GetEdited();
+            if (it == null || it.GetMetadata(0).VariantType == Variant.Type.Nil) return;
+            int i = it.GetMetadata(0).AsInt32();
+            if (it.IsChecked(0)) _ticked.Add(i); else _ticked.Remove(i);
+            UpdateTickHint();
+        };
         _table.ItemActivated += () => { int i = _table.GetSelected()?.GetMetadata(0).AsInt32() ?? -1; if (i >= 0) Edit(i); };
         SetUpDragging();
         _win.Body.AddChild(_table);
 
         _win.Body.AddChild(Kit.Row(
-            Kit.Label("Selected step:", null, 13, "Dim"),
-            Kit.Btn("Edit", () => WithStep(Edit)),
-            Kit.Btn("Up", () => WithStep(i => { _selected = Math.Max(0, i - 1); _queue.Move(i, -1); })),
-            Kit.Btn("Down", () => WithStep(i => { _selected = Math.Min(_queue.State.Steps.Count - 1, i + 1); _queue.Move(i, 1); })),
-            Kit.Btn("Remove", () => WithStep(i => { _selected = -1; _queue.Remove(i); })),
-            Kit.Btn("Run from here", () => WithStep(i => { _tabPinned = false; _queue.Start(i); })),
+            WithTip(Kit.Btn("Edit", () => WithStep(Edit)), "Change the selected step (or double-click it)"),
+            WithTip(Kit.Btn("Up", () => MoveRows(-1)), "Move the ticked steps (or the selected one) up one place"),
+            WithTip(Kit.Btn("Down", () => MoveRows(1)), "Move the ticked steps (or the selected one) down one place"),
+            WithTip(Kit.Btn("Remove", RemoveRows), "Remove the ticked steps (or the selected one)"),
+            WithTip(Kit.Btn("Run from here", () => WithStep(i => { _tabPinned = false; _queue.Start(i); })), "Start the queue at the selected step; steps above it count as done"),
             _undo = Kit.Btn("Undo", () => _queue.Undo()),
             Kit.Spacer(),
-            _stepHint = Kit.Label("drag rows to reorder, double-click to edit", null, 12, "Dim"),
-            Kit.Btn("Remove all", _queue.Clear)));
+            _stepHint = Kit.Label("", null, 12, "Dim"),
+            WithTip(Kit.Btn("Tick all", ToggleTicks), "Tick every step, or clear the ticks"),
+            WithTip(Kit.Btn("Remove finished", _queue.RemoveDone), "Take every finished or skipped step off the list"),
+            WithTip(Kit.Btn("Remove all", _queue.Clear), "Empty the queue (Undo brings it back)")));
+        var stepRow = (Control)_win.Body.GetChild(_win.Body.GetChildCount() - 1);
 
         _idle = new ActionPicker(allowNone: true);
         _idle.Changed += () => _queue.SetIdle(_idle.Selected);
         _win.Body.AddChild(Kit.Row(Kit.Label("When the queue waits or ends, do", null, 13, "Dim"), _idle.SkillBox, _idle.ActionPick.Button,
             WithTip(Kit.Btn("Copy what I'm doing", () => _idle.UseCurrent()), "Set the idle action to what your character is doing right now")));
+        var idleRow = (Control)_win.Body.GetChild(_win.Body.GetChildCount() - 1);
         _idleNote = Kit.Label("", null, 12, "Dim");
         _win.Body.AddChild(_idleNote);
         _status = Kit.Label("", Kit.Good, 14);
@@ -251,6 +267,19 @@ sealed class QueueWindow
 
         _win.Opened += OnOpened;
         _queue.Changed += () => { if (_win.Visible) Rebuild(); };
+
+        void Tab(int i) { _tabPinned = true; ShowTab(i); }
+        _win.SetTour(
+            new TourStep("What Course does", "Course runs your actions one after another: cut 500 logs, then burn them, then fight until level 40. Build the list, press [b]Start[/b], and it keeps going while you play or idle."),
+            new TourStep("Tabs", "[b]Add a step[/b] is where most steps come from. [b]Plan an item[/b] works out every step to make something. [b]Saved and shared[/b] keeps queues and share codes from the wiki planner. [b]Options[/b] changes how the queue behaves.", () => tabRow, () => Tab(0)),
+            new TourStep("Pick the action", "Choose a skill, then the action. [b]Copy what I'm doing[/b] fills in what your character is doing now. Agility lists each path of a course on its own, or \"(best path)\" to let Course pick.", () => doRow, () => Tab(0)),
+            new TourStep("Say when it ends", "Pick the goal: a level, an amount, until the bank holds some, and so on. [b]Add step[/b] puts it at the bottom of the list. A line under this shows how long it should take.", () => _goalRow, () => Tab(0)),
+            new TourStep("The list", "Steps run top to bottom. Tick the boxes to work on several at once, drag rows to reorder them, and double-click a step to change it. [b]State[/b] shows progress.", () => _table),
+            new TourStep("Edit the list", "These work on the ticked steps, or the selected one if none are ticked. [b]Undo[/b] takes back the last change, even [b]Remove all[/b].", () => stepRow),
+            new TourStep("Start", "Runs the queue from the top. While it runs this button pauses it. [b]Run from here[/b] starts at the selected step.", () => _run),
+            new TourStep("When it's done", "What your character does when the queue waits or ends, so it is never idle.", () => idleRow),
+            new TourStep("Options", "Loop the queue, take finished steps off, sounds when it needs you, putting on each step's gear, and more. [b]Help[/b] in the title bar has the details.", () => _panels[4], () => Tab(4)),
+            new TourStep("That's it", "Open Course with its key from anywhere (the Mods menu shows and changes keys). The Tour button runs this again.", null, () => Tab(0)));
     }
 
     public void SetKeyLabel(string key) => _win.CloseText = key.Length > 0 ? $"Close ({key})" : "Close";
@@ -314,7 +343,7 @@ sealed class QueueWindow
     }
     readonly List<(CheckBox Box, Func<QueueState, bool> Get)> _options = new();
 
-    static Tree MakeTable(string[] titles, int[] widths, int iconCol, int minHeight, int[]? expandCols = null)
+    static Tree MakeTable(string[] titles, int[] widths, int iconCol, int minHeight, int[]? expandCols = null, int[]? ratios = null)
     {
         var t = new Tree
         {
@@ -330,6 +359,7 @@ sealed class QueueWindow
             t.SetColumnTitleAlignment(c, HorizontalAlignment.Left);
             t.SetColumnCustomMinimumWidth(c, widths[c]);
             t.SetColumnExpand(c, expandCols?.Contains(c) ?? c < 2);
+            if (ratios != null) t.SetColumnExpandRatio(c, ratios[c]);
         }
         return t;
     }
@@ -1089,6 +1119,46 @@ sealed class QueueWindow
 
     // ---- the table ----
 
+    // Ticked rows if any, else the selected one.
+    List<int> Rows() => _ticked.Count > 0 ? _ticked.Where(i => i < _queue.State.Steps.Count).OrderBy(i => i).ToList()
+        : _selected >= 0 && _selected < _queue.State.Steps.Count ? new List<int> { _selected } : new List<int>();
+
+    void MoveRows(int by)
+    {
+        var rows = Rows();
+        if (rows.Count == 0) return;
+        bool ticked = _ticked.Count > 0;
+        var moved = _queue.MoveMany(rows, by);
+        AfterMove(moved, ticked);
+    }
+
+    void AfterMove(List<int> moved, bool ticked)
+    {
+        if (moved.Count == 0) return;
+        _selected = moved[0];
+        _ticked = ticked ? moved.ToHashSet() : new();
+        Rebuild();
+    }
+
+    void RemoveRows()
+    {
+        var rows = Rows();
+        if (rows.Count == 0) return;
+        _selected = -1;
+        _ticked.Clear();
+        _queue.RemoveMany(rows);
+    }
+
+    void ToggleTicks()
+    {
+        int n = _queue.State.Steps.Count;
+        _ticked = _ticked.Count == n ? new() : Enumerable.Range(0, n).ToHashSet();
+        Rebuild();
+    }
+
+    void UpdateTickHint() =>
+        _stepHint.Text = _ticked.Count > 0 ? $"{_ticked.Count} ticked: Up, Down, Remove and dragging move them together" : "tick steps to move or remove several; drag to reorder; double-click to edit";
+
     void SetUpDragging()
     {
         _table.SetDragForwarding(
@@ -1096,24 +1166,27 @@ sealed class QueueWindow
             {
                 TreeItem? item = _table.GetItemAtPosition(at);
                 if (item == null || item.GetMetadata(0).VariantType == Variant.Type.Nil) return default(Variant);
-                _table.SetDragPreview(Kit.Label(item.GetText(2), Kit.Text));
+                int i = item.GetMetadata(0).AsInt32();
+                // A ticked row drags every ticked row with it.
+                int[] rows = _ticked.Contains(i) ? _ticked.OrderBy(x => x).ToArray() : new[] { i };
+                _table.SetDragPreview(Kit.Label(rows.Length > 1 ? $"{rows.Length} steps" : item.GetText(1), Kit.Text));
                 _table.DropModeFlags = (int)Tree.DropModeFlagsEnum.Inbetween;
-                return Variant.From(item.GetMetadata(0).AsInt32());
+                return Variant.From(rows);
             }),
-            Callable.From((Vector2 at, Variant data) => data.VariantType == Variant.Type.Int),
+            Callable.From((Vector2 at, Variant data) => data.VariantType == Variant.Type.PackedInt32Array),
             Callable.From((Vector2 at, Variant data) =>
             {
                 _table.DropModeFlags = 0;
-                int from = data.AsInt32();
+                int[] rows = data.AsInt32Array();
+                if (rows.Length == 0) return;
                 TreeItem? item = _table.GetItemAtPosition(at);
-                int to = _queue.State.Steps.Count - 1;
+                // Where the drop lands in the list, then without the moved rows above it.
+                int to = _queue.State.Steps.Count;
                 if (item != null && item.GetMetadata(0).VariantType != Variant.Type.Nil)
-                {
                     to = item.GetMetadata(0).AsInt32() + (_table.GetDropSectionAtPosition(at) > 0 ? 1 : 0);
-                    if (to > from) to--;
-                }
-                _selected = to;
-                _queue.MoveTo(from, to);
+                to -= rows.Count(r => r < to);
+                bool ticked = rows.Length > 1 || _ticked.Contains(rows[0]);
+                AfterMove(_queue.MoveManyTo(rows, to), ticked);
             }));
     }
 
@@ -1127,15 +1200,18 @@ sealed class QueueWindow
         if (st.Running && !_tabPinned && _panels.Any(p => p.Visible)) ShowTab(-1);
         if (_tab == 3 && _panels[3].Visible) RefreshHistory();
 
-        _table.Clear();
-        TreeItem root = _table.CreateItem();
+        // Rows are updated in place (Kit.Rows), so the list keeps its scroll position while the queue runs.
+        TreeItem[] rows = Kit.Rows(_table, Math.Max(1, st.Steps.Count));
         Game? game = GameAccess.CurrentGame;
         var current = new HashSet<Step>(st.Running ? _queue.CurrentSteps() : Enumerable.Empty<Step>());
         for (int i = 0; i < st.Steps.Count; i++)
         {
             Step s = st.Steps[i];
-            TreeItem row = _table.CreateItem(root);
+            TreeItem row = rows[i];
             row.SetMetadata(0, i);
+            row.SetCellMode(0, TreeItem.TreeCellMode.Check);
+            row.SetEditable(0, true);
+            row.SetChecked(0, _ticked.Contains(i));
             row.SetText(0, (i + 1).ToString());
             if (game != null)
             {
@@ -1146,18 +1222,26 @@ sealed class QueueWindow
             row.SetText(1, Queue.Label(s) + extra);
             if (extra.Length > 0) row.SetTooltipText(1, "Set up when this step starts:" + extra.TrimStart(','));
             row.SetText(2, s.GoalText());
-            row.SetText(3, StateText(game, s, current.Contains(s)));
+            string state = StateText(game, s, current.Contains(s));
+            row.SetText(3, state);
+            row.SetTooltipText(3, state);
             row.SetCustomColor(0, Kit.Dim);
             row.SetCustomColor(3, StateColor(s));
             if (s.Done) { row.SetCustomColor(1, Kit.Dim); row.SetCustomColor(2, Kit.Dim); }
             if (current.Contains(s)) for (int col = 0; col < 4; col++) row.SetCustomBgColor(col, s_currentRow);
-            if (i == _selected) row.Select(0);
+            if (i == _selected) row.Select(0); else row.Deselect(0);
         }
+        _ticked.RemoveWhere(i => i >= st.Steps.Count);
+        UpdateTickHint();
         if (st.Steps.Count == 0)
         {
-            TreeItem hint = _table.CreateItem(root);
+            TreeItem hint = rows[0];
+            hint.SetCellMode(0, TreeItem.TreeCellMode.String);
+            hint.SetEditable(0, false);
+            hint.SetMetadata(0, default(Variant));
+            for (int col = 0; col < 4; col++) hint.SetText(col, "");
             hint.SetText(1, game == null ? "Load a character to pick actions." : "No steps yet. Add a step or plan an item above.");
-            hint.SetCustomColor(2, Kit.Dim);
+            hint.SetCustomColor(1, Kit.Dim);
             for (int col = 0; col < 4; col++) hint.SetSelectable(col, false);
         }
         UpdateStatus();
@@ -1247,7 +1331,9 @@ sealed class QueueWindow
             {
                 Step s = _queue.State.Steps[i];
                 row.SetText(1, Queue.Label(s) + DoExtra(game, s));
-                row.SetText(3, StateText(game, s, current.Contains(s)));
+                string state = StateText(game, s, current.Contains(s));
+                row.SetText(3, state);
+                row.SetTooltipText(3, state);
                 row.SetCustomColor(3, StateColor(s));
             }
             row = row.GetNext();

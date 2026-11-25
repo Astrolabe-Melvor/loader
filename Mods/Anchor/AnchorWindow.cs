@@ -87,6 +87,14 @@ sealed class AnchorWindow
 
         _win.Opened += Refresh;
         _v.Changed += () => { if (_win.Visible) Refresh(); };
+
+        _win.SetTour(
+            new TourStep("What Anchor does", "Anchor keeps copies of your save, so a mistake (a bad sale, a wrong unlock) can be undone. It backs up on a timer and when the game starts."),
+            new TourStep("Which character", "Backups are kept per character. The one you're playing is picked.", () => _who),
+            new TourStep("Back up now", "Makes a backup right away. Add a note so you know which is which later.", () => _backup),
+            new TourStep("Your backups", "Newest first, with total level and GP so you can tell them apart. Pick one to work on it.", () => _table),
+            new TourStep("Restore", "Puts that backup back. Anchor saves the current state first, so a restore can be undone too. [b]Copy as export string[/b] gives text the game's own Import accepts.", () => _restore),
+            new TourStep("How often", "How often to back up, and how many to keep. One a day is kept for longer as well.", () => (Control?)_win.Body.GetChild(_win.Body.GetChildCount() - 1)));
     }
 
     public void Toggle() => _win.Toggle();

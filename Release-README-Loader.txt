@@ -13,7 +13,18 @@ UNINSTALL
 Delete "override.cfg" and the folder "data_MelvorModLoader_windows_x86_64". The game then runs untouched.
 Your "mods" folder can stay.
 
+THE MODS MENU (F1)
+- Each mod's version and whether it is working. Hover a status for details.
+- Every mod window and its key; click a key to change it.
+- Updates: once a day it checks GitHub for newer versions and lists them. Nothing is downloaded by itself.
+- Report a bug: copies a report with your versions and the log, ready to paste into GitHub or Discord.
+Each mod window has Help and a Tour in its title bar.
+
+UPDATING
+Close the game, extract the new zips over the old ones. Your settings in "mods" are kept.
+
 AFTER A GAME UPDATE
+The loader's tag in the top-left says when the game updated and which mods may be affected.
 If the game does not start, delete "override.cfg" and wait for an updated loader.
 
 Not affiliated with Games by Malcs or Jagex. Source: https://github.com/Astrolabe-Melvor/loader

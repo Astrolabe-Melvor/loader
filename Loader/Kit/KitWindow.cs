@@ -12,7 +12,7 @@ namespace Astrolabe.UI;
 /// The window fits its content but never the screen's edges (the body scrolls instead), can be resized from the
 /// corner grip (remembered per window), and follows the mod window size set in the Mods menu.
 /// </summary>
-public sealed class KitWindow
+public sealed partial class KitWindow
 {
     readonly CanvasLayer _layer;
     readonly Label _title;
@@ -99,6 +99,11 @@ public sealed class KitWindow
 
         HeaderExtras = new HBoxContainer();
         bar.AddChild(HeaderExtras);
+
+        _tourBtn = Kit.Btn("Tour", () => StartTour());
+        _tourBtn.Visible = false;
+        _tourBtn.TooltipText = "A short walk through this window, pointing at each part";
+        bar.AddChild(_tourBtn);
 
         _help = Kit.Btn("Help", ToggleHelp);
         _help.Visible = false;
@@ -299,6 +304,7 @@ public sealed class KitWindow
         if (!_placed) ((SceneTree)Engine.GetMainLoop()).CreateTimer(0.05).Timeout += Center;
         else Callable.From(KeepOnScreen).CallDeferred();
         Opened?.Invoke();
+        OfferTour();
     }
 
     public void Close()
@@ -307,6 +313,7 @@ public sealed class KitWindow
         DropFocus();
         _layer.Visible = false;
         _dragging = _resizing = false;
+        EndTour();
         Closed?.Invoke();
     }
 
@@ -318,6 +325,7 @@ public sealed class KitWindow
     /// <summary>Removes the window for good.</summary>
     public void Free()
     {
+        EndTour();
         s_stack.Remove(this);
         s_all.Remove(this);
         WindowPrefs.ScaleChanged -= OnScale;
@@ -327,7 +335,8 @@ public sealed class KitWindow
     void Center()
     {
         Vector2 screen = Screen;
-        Root.Position = ((screen - Root.Size) / 2).Floor();
+        // Where it was last dragged to, else the middle of the screen.
+        Root.Position = WindowPrefs.PositionOf(_key) ?? ((screen - Root.Size) / 2).Floor();
         _placed = true;
         KeepOnScreen();
     }
@@ -354,6 +363,7 @@ public sealed class KitWindow
     {
         if (e is InputEventMouseButton { ButtonIndex: MouseButton.Left } mb)
         {
+            if (_dragging && !mb.Pressed) WindowPrefs.SetPosition(_key, Root.Position);   // opens here next time
             _dragging = mb.Pressed;
             if (mb.Pressed)
             {
@@ -379,6 +389,7 @@ public static class WindowPrefs
     {
         public float Scale { get; set; } = 1f;
         public Dictionary<string, float[]> Sizes { get; set; } = new();
+        public Dictionary<string, float[]> Positions { get; set; } = new();
     }
 
     static Data? s_data;
@@ -409,10 +420,20 @@ public static class WindowPrefs
         Save();
     }
 
-    /// <summary>Every window back to fitting its content.</summary>
+    public static Vector2? PositionOf(string window) =>
+        D.Positions.TryGetValue(window, out float[]? p) && p.Length == 2 ? new Vector2(p[0], p[1]) : null;
+
+    public static void SetPosition(string window, Vector2 at)
+    {
+        D.Positions[window] = new[] { at.X, at.Y };
+        Save();
+    }
+
+    /// <summary>Every window back to fitting its content, centred on screen.</summary>
     public static void ResetSizes()
     {
         D.Sizes.Clear();
+        D.Positions.Clear();
         Save();
         ScaleChanged?.Invoke();
     }

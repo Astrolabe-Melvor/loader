@@ -44,6 +44,12 @@ for /d %%M in ("%~dp0Mods\*") do (
   )
 )
 
+rem ---- everything in one zip ----
+set "ALL=%STAGE%\all"
+mkdir "%ALL%"
+for /d %%S in ("%STAGE%\*") do if /i not "%%~nxS"=="all" xcopy /e /i /y /q "%%S" "%ALL%" >nul
+call :zip "%ALL%" "%DIST%\AstrolabeAll-%LVER%.zip"
+
 echo.
 echo Zips in %DIST%:
 dir /b "%DIST%\*.zip"
@@ -52,7 +58,7 @@ if /i "%~1"=="release" (
   where gh >nul 2>nul || ( echo The gh CLI is needed to upload: https://cli.github.com & pause & exit /b 1 )
   set "TAG=v%LVER%"
   echo Uploading to the GitHub release !TAG! of Astrolabe-Melvor/loader...
-  gh release view !TAG! -R Astrolabe-Melvor/loader >nul 2>nul || gh release create !TAG! -R Astrolabe-Melvor/loader -t "Astrolabe Loader %LVER%" -n "Extract each zip into the Melvor Idle 2 game folder (next to Melvor2.exe). Loader first, then any mods."
+  gh release view !TAG! -R Astrolabe-Melvor/loader >nul 2>nul || gh release create !TAG! -R Astrolabe-Melvor/loader -t "Astrolabe %LVER%" -F "%~dp0RELEASE-NOTES.md"
   gh release upload !TAG! "%DIST%\*.zip" -R Astrolabe-Melvor/loader --clobber
 )
 pause

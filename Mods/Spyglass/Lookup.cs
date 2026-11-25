@@ -27,15 +27,24 @@ public sealed class Lookup
 
     static Lookup? s_data;
     static Task? s_loading;
+    static bool s_force;
+
+    /// <summary>Downloads the data again even if the copy here is recent (after a game update, say).</summary>
+    public static void Refresh(string folder, Action<string> log)
+    {
+        s_force = true;
+        Get(folder, log);
+    }
     public static string State { get; private set; } = "not loaded";
 
     /// <summary>The data if ready; starts loading it otherwise.</summary>
     public static Lookup? Get(string folder, Action<string> log)
     {
-        if (s_data != null || (s_loading != null && !s_loading.IsCompleted)) return s_data;
+        if ((s_data != null && !s_force) || (s_loading != null && !s_loading.IsCompleted)) return s_data;
         string file = Path.Combine(folder, "spyglass.json");
-        if (File.Exists(file)) s_data = Parse(File.ReadAllText(file), log);
-        bool stale = s_data == null || DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > TimeSpan.FromDays(1);
+        if (s_data == null && File.Exists(file)) s_data = Parse(File.ReadAllText(file), log);
+        bool stale = s_force || s_data == null || DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > TimeSpan.FromDays(1);
+        s_force = false;
         if (!stale) { State = "ready"; return s_data; }
         s_loading = Task.Run(async () =>
         {

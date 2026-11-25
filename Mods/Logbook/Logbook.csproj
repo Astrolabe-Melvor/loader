@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Logbook</AssemblyName>
     <RootNamespace>Astrolabe.Logbook</RootNamespace>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Product>Astrolabe Logbook</Product>
   </PropertyGroup>
 </Project>

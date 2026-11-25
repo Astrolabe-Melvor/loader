@@ -199,6 +199,16 @@ sealed class HoldWindow
         timer.Timeout += () => { if (_win.Visible && _tab == 1 && GameAccess.CurrentGame is Game g) RefreshShop(g); };
         _win.Root.AddChild(timer);
         _k.Changed += () => { if (_win.Visible) Refresh(); };
+
+        _win.SetTour(
+            new TourStep("What Hold does", "Hold shows what your bank is worth, sells what you don't need by rules you set, and buys shop upgrades and supplies when you can afford them."),
+            new TourStep("Bank tabs", "Your bank's tabs with what each is worth. Click one to see only that tab.", () => _tabs, () => Show(0)),
+            new TourStep("Your bank", "Every item, most valuable first. Search, or show only items with or without a rule. Pick a row to work on it.", () => _table, () => Show(0)),
+            new TourStep("Rules", "Give the picked item a rule: keep some and sell the rest, or junk (always sell it all). [b]Sell all now[/b] sells it straight away.", () => _rule.GetParent() as Control, () => Show(0)),
+            new TourStep("Selling", "[b]Sell by my rules now[/b] applies every rule once. Tick the box to do it every 10 seconds while you play. Locked bank stacks are never sold.", () => _sellRules.GetParent() as Control, () => Show(0)),
+            new TourStep("The shop", "Every purchase you can see. Pick one to buy it, or give it a rule like \"buy as soon as I can\".", () => _shop, () => Show(1)),
+            new TourStep("Buy order and reserves", "Which rules buy first when money is short, and how much gold or other currency to always keep back.", () => _order.GetParent() as Control, () => Show(1)),
+            new TourStep("History", "Everything Hold sold or bought, and for how much.", () => _sold, () => Show(2)));
     }
 
     public void Toggle() => _win.Toggle();

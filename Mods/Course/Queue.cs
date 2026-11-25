@@ -52,6 +52,8 @@ public sealed class Step
     public long StartTimes { get; set; }
     public DateTime StartedUtc { get; set; }
 
+    /// <summary>Reached its goal (not skipped, not passed over by "Run from here").</summary>
+    [JsonIgnore] public bool Finished { get; set; }
     [JsonIgnore] public string State { get; set; } = "";
     [JsonIgnore] public bool Waiting { get; set; }
     [JsonIgnore] public double RetryAt { get; set; }
@@ -104,7 +106,7 @@ public sealed class Step
 
     public void Reset()
     {
-        Begun = Done = Waiting = false;
+        Begun = Done = Waiting = Finished = false;
         State = "";
         Restarts = Tries = 0;
         RetryAt = LastRestart = BestCheckAt = 0;
@@ -126,6 +128,7 @@ public sealed class QueueState
     public bool FoodGuard { get; set; } = true;   // stop a combat step when the selected food runs out
     public bool BankGuard { get; set; } = true;   // pause when the bank is full
     public bool Hud { get; set; } = true;         // show the current step in a corner of the screen
+    public bool RemoveFinished { get; set; }      // take steps off the list once they reach their goal (not while looping)
     public float HudX { get; set; } = -1;          // panel position, -1 = default spot (top-left, beside the logo)
     public float HudY { get; set; } = -1;
     public bool HudMin { get; set; }              // folded to one line
@@ -227,6 +230,7 @@ sealed class Queue
     {
         Note(text);
         if (State.Alerts) Alert?.Invoke(text);
+        MelvorModLoader.Messages.Publish("course.alert", text);   // Beacon can show it or post it to Discord
     }
 
     public Queue(string folder, Action<string> log)
@@ -387,6 +391,44 @@ sealed class Queue
         (State.Steps[i], State.Steps[j]) = (State.Steps[j], State.Steps[i]);
     });
 
+    /// <summary>Several steps at once, by index.</summary>
+    public void RemoveMany(IReadOnlyCollection<int> rows) => Change(rows.Count == 1 ? "remove a step" : $"remove {rows.Count} steps", () =>
+    {
+        foreach (int i in rows.Where(i => i >= 0 && i < State.Steps.Count).OrderByDescending(i => i)) State.Steps.RemoveAt(i);
+        if (State.Steps.Count == 0) State.Running = false;
+    });
+
+    public void RemoveDone() => Change("remove finished steps", () => State.Steps.RemoveAll(x => x.Done));
+
+    /// <summary>Moves the steps (kept in their order) so the first lands at <paramref name="to"/> in the list without them.
+    /// Returns where they ended up.</summary>
+    public List<int> MoveManyTo(IReadOnlyCollection<int> rows, int to)
+    {
+        var picked = rows.Where(i => i >= 0 && i < State.Steps.Count).Distinct().OrderBy(i => i).ToList();
+        var result = new List<int>();
+        if (picked.Count == 0) return result;
+        Change(picked.Count == 1 ? "move a step" : $"move {picked.Count} steps", () =>
+        {
+            var steps = picked.Select(i => State.Steps[i]).ToList();
+            foreach (int i in Enumerable.Reverse(picked)) State.Steps.RemoveAt(i);
+            int at = Math.Clamp(to, 0, State.Steps.Count);
+            State.Steps.InsertRange(at, steps);
+            result.AddRange(Enumerable.Range(at, steps.Count));
+        });
+        return result;
+    }
+
+    /// <summary>Up (-1) or down (+1) one place, as a block.</summary>
+    public List<int> MoveMany(IReadOnlyCollection<int> rows, int by)
+    {
+        var picked = rows.Where(i => i >= 0 && i < State.Steps.Count).OrderBy(i => i).ToList();
+        if (picked.Count == 0) return picked;
+        int first = picked[0];
+        int to = Math.Clamp(first + by, 0, State.Steps.Count - picked.Count);
+        if (to == first && picked[^1] - first == picked.Count - 1) return picked;
+        return MoveManyTo(picked, to);
+    }
+
     public void MoveTo(int from, int to) => Change("move a step", () =>
     {
         if (from < 0 || from >= State.Steps.Count) return;
@@ -518,7 +560,8 @@ sealed class Queue
         double minutes = (DateTime.UtcNow - s.StartedUtc).TotalMinutes;
         if (minutes < 1) return "";
         double eta = left / (gained / minutes);
-        return eta < 1 ? "  ~1 min left" : eta < 120 ? $"  ~{Math.Ceiling(eta)} min left" : $"  ~{eta / 60:0.#} h left";
+        return eta < 1 ? "  ~1 min left" : eta < 120 ? $"  ~{Math.Ceiling(eta)} min left"
+            : eta < 48 * 60 ? $"  ~{eta / 60:0.#} h left" : $"  ~{eta / 1440:0.#} days left";
     }
 
     static bool Reached(Game game, Step s) => s.Goal switch
@@ -602,6 +645,7 @@ sealed class Queue
 
         bool changed = false;
         foreach (Step s in current) changed |= Run(game, s, now);
+        if (State.RemoveFinished && !State.Loop && State.Steps.RemoveAll(x => x.Finished) > 0) changed = true;
 
         // While the step waits for materials, the idle action uses the free time.
         List<Step> after = CurrentSteps().ToList();
@@ -879,6 +923,7 @@ sealed class Queue
     {
         Note(note);
         s.Done = true;
+        s.Finished = true;
         s.Waiting = false;
         s.State = how;
         return true;

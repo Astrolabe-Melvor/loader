@@ -6,6 +6,7 @@ using System.Reflection;
 using GamesByMalcs.Melvor2;
 using GamesByMalcs.Melvor2.Components.Actions;
 using GamesByMalcs.Melvor2.Components.CombatAreas;
+using GamesByMalcs.Melvor2.Entities.Agility;
 using GamesByMalcs.Melvor2.Data;
 using GamesByMalcs.Melvor2.Data.Items;
 using GamesByMalcs.Melvor2.Entities;
@@ -67,9 +68,33 @@ static class Catalog
                     if (actions.Count > 0) break;
                 }
 
+            if (comp is AgilityActionComponent ag) actions = AgilityPaths(ag, skill, actions);
             if (actions.Count > 0) result.Add(new SkillChoice(entity.Id, skill, actions, entity.Icon));
         }
         return result.OrderBy(s => s.Name).ToList();
+    }
+
+    /// <summary>
+    /// Agility courses have more than one path (Simple, Advanced, ...): each gets its own entry (Area = the path's id)
+    /// after the course's own entry, which runs whichever path gives the most XP.
+    /// </summary>
+    static List<ActionChoice> AgilityPaths(AgilityActionComponent ag, string skill, List<ActionChoice> courses)
+    {
+        var list = new List<ActionChoice>();
+        foreach (ActionChoice a in courses)
+        {
+            var course = ag.Courses.FirstOrDefault(kv => kv.Key.Id == a.Ref.Target).Value;
+            var paths = course?.ActivePaths.Values.ToList() ?? new();
+            if (paths.Count < 2) { list.Add(a); continue; }
+            string name = course!.Course.DisplayName.ToString();
+            list.Add(new ActionChoice(new ActionRef { Entity = a.Ref.Entity, Target = a.Ref.Target, Label = $"{skill}: {name} (best path)" }, $"{name} (best path)", a.Locked, a.Icon, a.Key));
+            foreach (ActiveAgilityCoursePath p in paths)
+            {
+                string pn = p.Path.DisplayName.ToString();
+                list.Add(new ActionChoice(new ActionRef { Entity = a.Ref.Entity, Target = a.Ref.Target, Area = p.Path.Id, Label = $"{skill}: {name} ({pn})" }, $"{name}: {pn}", a.Locked, a.Icon, a.Key));
+            }
+        }
+        return list;
     }
 
     static void AddCombat(GameEntity entity, string skill, List<ActionChoice> actions)
@@ -191,6 +216,20 @@ static class Catalog
         object? data = DataOf(game, r);
         if (data != null)
             try { Walk(data, found, new HashSet<object>(ReferenceEqualityComparer.Instance), 0); }
+            catch { }
+        // Agility Marks and the like drop from a path's obstacles, which the walk above doesn't follow (paths are
+        // game objects of their own). One path when the step names it, else every path of the course.
+        if (data is AgilityCourse course)
+            try
+            {
+                var marks = new List<Item>();
+                foreach (AgilityCoursePath path in course.Paths)
+                    if (r.Area.Length == 0 || path.Id == r.Area)
+                        marks.AddRange(path.RandomObstacleProducts.Select(q => q.Item).Where(i => i != null));
+                foreach (var timed in course.TimedCompletionRewards ?? Enumerable.Empty<TimedItemCurrencyRewards>())
+                    marks.AddRange(timed.Items.Select(q => q.Item).Where(i => i != null));
+                found.InsertRange(0, marks);
+            }
             catch { }
         return s_outputs[key] = found.Distinct().ToList();
     }

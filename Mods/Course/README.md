@@ -16,7 +16,9 @@ Do one action until a goal is reached, then the next. Built on Astrolabe Loader.
 
 ## The table
 
-Drag rows to reorder, double-click (or Edit) to change a step. Item goals show the time left at the current pace. While the queue runs the tabs fold away; click one to bring it back.
+Drag rows to reorder, double-click (or Edit) to change a step. Tick the box on several rows to move, drag or remove them together; **Tick all** ticks every step. **Remove finished** clears done and skipped steps, and the option "Take steps off the list once they reach their goal" does it as you go (not while the queue loops). Item goals show the time left at the current pace. While the queue runs the tabs fold away; click one to bring it back.
+
+**Agility:** each path of a course is its own action ("Jump 3: Advanced Path"), so a step runs the path you picked; "(best path)" lets Course pick the fastest one you can run. Agility steps can also run until the bank holds (or you gain) a number of Agility Marks.
 
 **Idle action:** what to do while a step waits for materials, and after the queue ends.
 

@@ -20,6 +20,8 @@ public sealed class BeaconMod : IMod
         Messages.Subscribe("hold.bought", d => { if (d is string t) _watcher.FromMod(Kind.ShopBought, t); });
         Messages.Subscribe("hold.unlocked", d => { if (d is string t) _watcher.FromMod(Kind.ShopUnlocked, t); });
         Messages.Subscribe("deckhand.alert", d => { if (d is string t) _watcher.FromMod(Kind.Farming, t); });
+        Messages.Subscribe("course.alert", d => { if (d is string t) _watcher.FromMod(Kind.Queue, t); });
+        Messages.Subscribe("logbook.rare", d => { if (d is string t) _watcher.FromMod(Kind.RareDrop, t); });
         _entry = ctx.AddWindow("Beacon", Toggle, Key.F8);
         _entry.Changed += () => _window?.SetKeyLabel(_entry.KeyLabel);
         ctx.Frame += () => _watcher.Tick(GameAccess.CurrentGame, Time.GetTicksMsec() / 1000.0);

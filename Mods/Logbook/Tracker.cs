@@ -288,7 +288,12 @@ public sealed class Tracker
             Why = rare ? $"rare: about 1 in {actions / Math.Max(1, times):N0} {per}" : "first this session",
         });
         if (Session.Drops.Count > MaxDrops) Session.Drops.RemoveRange(0, Session.Drops.Count - MaxDrops);
+        // Beacon can alert on these; once per item per session so a lucky streak doesn't spam.
+        if (rare && s_rareSent.Add(Session.Character + "|" + id))
+            Messages.Publish("logbook.rare", $"Rare drop: {Session.NameOf(id)} x{qty:N0} (about 1 in {actions / Math.Max(1, times):N0} {per})");
     }
+
+    static readonly HashSet<string> s_rareSent = new();
 
     void Hook(Game game)
     {
@@ -387,6 +392,7 @@ public sealed class Tracker
     /// <summary>A character was loaded: the last session file for it ended when the game closed; keep it and start fresh.</summary>
     void Begin(Game game)
     {
+        s_rareSent.Clear();
         if (Session.Character.Length > 0) { Save(); Archive(Session); }
         Session = new Session { Character = game.CharacterName, StartedUtc = DateTime.UtcNow, LastUtc = DateTime.UtcNow };
         Session? last = ReadJson<Session>(CurrentFile);

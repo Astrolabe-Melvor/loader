@@ -20,6 +20,8 @@ public sealed class SpyglassMod : IMod
         // Other mods can open an item here: Messages.Publish("spyglass.show", "item id").
         Messages.Subscribe("spyglass.show", d => { if (d is string id) { Ensure(); _window!.LookUp(id); } });
         Lookup.Get(_folder, _log);   // start the download early
+        // The game updated: items may have changed, so fetch fresh data instead of waiting a day.
+        Messages.Subscribe("loader.gameupdated", _ => Lookup.Refresh(_folder, _log));
         ctx.Frame += () => _window?.Tick();
         ctx.Log("Ready. F10 opens Spyglass.");
     }

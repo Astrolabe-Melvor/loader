@@ -18,7 +18,7 @@ using MelvorModLoader;
 
 namespace Astrolabe.Beacon;
 
-public enum Kind { LevelUp, Pet, NewItem, LowFood, NoFood, BankFull, Idle, ShopBought, ShopUnlocked, Farming }
+public enum Kind { LevelUp, Pet, NewItem, LowFood, NoFood, BankFull, Idle, ShopBought, ShopUnlocked, Farming, Queue, RareDrop }
 
 /// <summary>How one kind of alert is delivered.</summary>
 public sealed class Rule
@@ -45,7 +45,8 @@ public sealed class Options
     public Rule Of(Kind k)
     {
         if (!Rules.TryGetValue(k, out Rule? r))
-            Rules[k] = r = new Rule { Discord = k is Kind.LevelUp or Kind.Pet };
+            // Course plays its own sound for queue alerts, so Beacon only shows them unless asked.
+            Rules[k] = r = k == Kind.Queue ? new Rule { Chime = "", Flash = false } : new Rule { Discord = k is Kind.LevelUp or Kind.Pet };
         return r;
     }
 }
@@ -69,6 +70,8 @@ public sealed class Watcher
         [Kind.ShopBought] = "Hold buys something by your shop rules",
         [Kind.ShopUnlocked] = "A shop purchase you have a rule for unlocks",
         [Kind.Farming] = "Farming or ranching needs you (from Deckhand: can't pay automation or a repair, bank full at harvest, no compost)",
+        [Kind.Queue] = "Course finishes its queue, skips a step or pauses (good for Discord while you're away)",
+        [Kind.RareDrop] = "A rare drop comes in (from Logbook: at most once per 40 actions of what you're doing)",
     };
 
     readonly string _folder;
@@ -178,6 +181,8 @@ public sealed class Watcher
         [Kind.ShopBought] = ("Bought from the shop", 0x8FD46F),
         [Kind.ShopUnlocked] = ("Shop purchase unlocked", 0x8EC9EE),
         [Kind.Farming] = ("Farming or ranching needs you", 0xF0C348),
+        [Kind.Queue] = ("Course", 0x8EC9EE),
+        [Kind.RareDrop] = ("Rare drop", 0xC58CF0),
     };
 
     /// <summary>What the character is up to, for the Discord post.</summary>

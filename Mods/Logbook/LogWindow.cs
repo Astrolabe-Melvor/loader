@@ -34,7 +34,9 @@ sealed class LogWindow
         _t = t;
         _win = new KitWindow("Logbook", "what you gained, and how fast", new Vector2(940, 0));
         _win.SetHelp(Help.Text);
-        _win.HeaderExtras.AddChild(Kit.Btn("Start a new session", () => _t.Restart()));
+        Button restart = Kit.Btn("Start a new session", () => _t.Restart());
+        restart.TooltipText = "End this session (it goes to Past sessions) and start counting from now";
+        _win.HeaderExtras.AddChild(restart);
 
         var tabRow = new HBoxContainer();
         for (int i = 0; i < s_tabs.Length; i++)
@@ -63,7 +65,7 @@ sealed class LogWindow
         // ---- notable drops ----
         var drops = Panel(1);
         _rareOnly = new CheckBox { Text = "Only rare drops" };
-        _rareOnly.Toggled += on => _t.SetOption(o => o.RareOnly = on);
+        _rareOnly.Toggled += on => { _t.SetOption(o => o.RareOnly = on); Refresh(); };
         drops.AddChild(Kit.Row(_rareOnly, Kit.Spacer(),
             Kit.Label("Rare: came in at most once per 40 actions of what you were doing. First: not seen before this session.", null, 12, "Dim")));
         _drops = Table(new[] { "Time", "Item", "Amount", "Why it is here" }, new[] { 120, 300, 90, 330 }, 430);
@@ -89,7 +91,16 @@ sealed class LogWindow
             + "it shows on its own as \"Last time away\"."));
 
         _win.Opened += () => { Show(_tab); Refresh(); };
-        _t.Changed += () => { if (_win.Visible && _tab != 2) Refresh(); };
+        // Tick refreshes every 2 seconds; tables update in place, so scrolling and selection stay put.
+
+        _win.SetTour(
+            new TourStep("What Logbook does", "Logbook counts what you gain while you play: XP, items, gold and drops, with rates per hour. It starts counting when you load a character."),
+            new TourStep("This session", "Your XP and GP per hour so far, and what you earned while away.", () => _head, () => Show(0)),
+            new TourStep("Skills", "XP gained, XP per hour, and how long until the next level at this rate. Click a column title to sort.", () => _skills, () => Show(0)),
+            new TourStep("Items", "Everything that came in or went out, per hour, and what it is worth.", () => _items, () => Show(0)),
+            new TourStep("Notable drops", "Rare drops (at most 1 in 40 actions) and items you got for the first time. Beacon can chime on rare drops.", () => _drops, () => Show(1)),
+            new TourStep("Past sessions", "The last 60 sessions, kept between game runs. Pick one to see what it earned.", () => _pastList, () => Show(2)),
+            new TourStep("New session", "Starts counting again from now, for timing one activity against another.", () => restart, () => Show(0)));
     }
 
     public void Toggle() => _win.Toggle();
@@ -209,11 +220,12 @@ sealed class LogWindow
 
     void FillSkills(Session s, Game? game)
     {
-        _skills.Clear();
-        TreeItem root = _skills.CreateItem();
-        foreach (var (id, line) in s.Skills.Where(kv => kv.Value.Xp > 0 || kv.Value.Actions > 0).OrderByDescending(kv => kv.Value.Xp))
+        var list = s.Skills.Where(kv => kv.Value.Xp > 0 || kv.Value.Actions > 0).OrderByDescending(kv => kv.Value.Xp).ToList();
+        TreeItem[] rows = Kit.Rows(_skills, Math.Max(1, list.Count));
+        for (int i = 0; i < list.Count; i++)
         {
-            TreeItem r = _skills.CreateItem(root);
+            var (id, line) = list[i];
+            TreeItem r = rows[i];
             r.SetText(0, line.Name.Length > 0 ? line.Name : s.NameOf(id));
             r.SetIcon(0, SkillIcon(game, id));
             r.SetText(1, line.Xp > 0 ? Num(line.Xp) : "");
@@ -226,22 +238,24 @@ sealed class LogWindow
             r.SetText(4, h == null ? "" : Span(h.Value));
             r.SetText(5, line.Actions > 0 ? Num(line.Actions) : "");
         }
-        if (root.GetChildCount() == 0)
+        if (list.Count == 0)
         {
-            TreeItem r = _skills.CreateItem(root);
+            TreeItem r = rows[0];
             r.SetText(0, "Nothing yet. Rates fill in as you train.");
+            for (int c = 1; c < _skills.Columns; c++) r.SetText(c, "");
             r.SetCustomColor(0, Kit.Dim);
         }
     }
 
     void FillItems(Session s, Game? game)
     {
-        _items.Clear();
-        TreeItem root = _items.CreateItem();
-        foreach (string id in s.Gained.Keys.Union(s.Used.Keys).OrderByDescending(id => s.Gained.TryGetValue(id, out long g) ? g : 0).Take(200))
+        var ids = s.Gained.Keys.Union(s.Used.Keys).OrderByDescending(id => s.Gained.TryGetValue(id, out long g) ? g : 0).Take(200).ToList();
+        TreeItem[] rows = Kit.Rows(_items, ids.Count);
+        for (int i = 0; i < ids.Count; i++)
         {
+            string id = ids[i];
             long g = s.Gained.TryGetValue(id, out long a) ? a : 0, u = s.Used.TryGetValue(id, out long b) ? b : 0;
-            TreeItem r = _items.CreateItem(root);
+            TreeItem r = rows[i];
             r.SetText(0, s.NameOf(id));
             r.SetIcon(0, ItemIcon(game, id));
             r.SetText(1, g > 0 ? Num(g) : "");
@@ -255,11 +269,12 @@ sealed class LogWindow
 
     void FillDrops(Session s, Game? game)
     {
-        _drops.Clear();
-        TreeItem root = _drops.CreateItem();
-        foreach (DropEvent d in Enumerable.Reverse(s.Drops).Where(d => d.Rare || !_t.Options.RareOnly))
+        var list = Enumerable.Reverse(s.Drops).Where(d => d.Rare || !_t.Options.RareOnly).ToList();
+        TreeItem[] rows = Kit.Rows(_drops, Math.Max(1, list.Count));
+        for (int i = 0; i < list.Count; i++)
         {
-            TreeItem r = _drops.CreateItem(root);
+            DropEvent d = list[i];
+            TreeItem r = rows[i];
             r.SetText(0, d.Time.ToString("MMM d HH:mm"));
             r.SetText(1, s.NameOf(d.Item));
             r.SetIcon(1, ItemIcon(game, d.Item));
@@ -268,9 +283,10 @@ sealed class LogWindow
             r.SetCustomColor(3, d.Rare ? Kit.Gold : Kit.Dim);
             if (d.Rare) r.SetCustomColor(1, Kit.Gold);
         }
-        if (root.GetChildCount() == 0)
+        if (list.Count == 0)
         {
-            TreeItem r = _drops.CreateItem(root);
+            TreeItem r = rows[0];
+            for (int c = 0; c < _drops.Columns; c++) r.SetText(c, "");
             r.SetText(1, "Nothing yet.");
             r.SetCustomColor(1, Kit.Dim);
         }

@@ -79,7 +79,7 @@ static class Finesse
     {
         SkillChoice? skill = Catalog.Skills(game).FirstOrDefault(s => s.Id == entityId);
         if (skill == null) return null;
-        var open = skill.Actions.Where(a => !a.LockedNow).ToList();
+        var open = skill.Actions.Where(a => !a.LockedNow).DistinctBy(a => a.Ref.Target).ToList();   // one entry per agility course
         if (Thieving(game) is { } th && th.Entity.Id == entityId)
         {
             double Rate(ActionChoice a)
@@ -162,7 +162,7 @@ static class Finesse
         if (Agility(game) is not { } ag || Technique(game, techId) is not { } tech) return new();
         SkillChoice? skill = Catalog.Skills(game).FirstOrDefault(s => s.Id == ag.Entity.Id);
         if (skill == null) return new();
-        foreach (ActionChoice a in skill.Actions.Where(a => !a.LockedNow))
+        foreach (ActionChoice a in skill.Actions.Where(a => !a.LockedNow).DistinctBy(a => a.Ref.Target))
         {
             var c = ag.Courses.FirstOrDefault(kv => kv.Key.Id == a.Ref.Target).Value;
             if (c == null || !c.Course.Requirements.AreMet || Toolbelt.Missing(game, a.Ref).Any(n => n.Have <= 0)) continue;
@@ -179,7 +179,8 @@ static class Finesse
     {
         if (Thieving(game) is { } th && th.ActiveRecipes.FirstOrDefault(kv => kv.Key.Id == r.Target).Value is { } t)
             return $"about {Num(ThieveXpHour(t))} XP/h at {t.Stats.SuccessChance.Value:P0} success";
-        if (Agility(game) is { } ag && ag.Courses.FirstOrDefault(kv => kv.Key.Id == r.Target).Value is { } c && (c.SelectedPath ?? BestPath(c)) is { } p)
+        if (Agility(game) is { } ag && ag.Courses.FirstOrDefault(kv => kv.Key.Id == r.Target).Value is { } c
+            && (c.ActivePaths.Values.FirstOrDefault(x => x.Path.Id == r.Area) ?? BestPath(c)) is { } p)
         {
             var techs = Techniques(game).Select(t => (t, x: TechXpHour(p, t))).Where(t => t.x > 0).Select(t => $"{t.t.Technique.DisplayName} {Num(t.x)}");
             return $"{p.Path.DisplayName}: about {Num(PathXpHour(p))} XP/h at {p.GetTotalSuccessChance():P0} per run; technique XP/h: {string.Join(", ", techs)}";
@@ -289,7 +290,8 @@ static class Finesse
     static int MaxHit(Game game, ActionRef r)
     {
         if (Thieving(game) is { } th && th.ActiveRecipes.FirstOrDefault(kv => kv.Key.Id == r.Target).Value is { } t) return t.Recipe.Damage;
-        if (Agility(game) is { } ag && ag.Courses.FirstOrDefault(kv => kv.Key.Id == r.Target).Value is { } c && (c.SelectedPath ?? BestPath(c)) is { } p)
+        if (Agility(game) is { } ag && ag.Courses.FirstOrDefault(kv => kv.Key.Id == r.Target).Value is { } c
+            && (c.ActivePaths.Values.FirstOrDefault(x => x.Path.Id == r.Area) ?? BestPath(c)) is { } p)
         {
             try { return p.GetMaxDamageOnFail(); } catch { }
         }

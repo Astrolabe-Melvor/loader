@@ -90,6 +90,14 @@ sealed class SpyglassWindow
 
         foreach (Tree t in new[] { _sources, _uses, _unlocks }) t.ItemActivated += () => Follow(t);
         _win.Opened += () => { Fill(); Show(_item); _search.GrabFocus(); };
+
+        _win.SetTour(
+            new TourStep("Find an item", "Type part of a name. Enter picks the first match.", () => _search),
+            new TourStep("Results", "Click an item to look it up.", () => _list),
+            new TourStep("How to get it", "Every way to get the item: which action makes it, which monster or chest drops it, and the chance.", () => _sources),
+            new TourStep("Used for", "What the item makes or buys, and what it is needed to unlock. Double-click a line to jump to that item; [b]Back[/b] returns.", () => _uses),
+            new TourStep("Plan it", "Sends the item to Course's planner, which works out every step to get this many.", () => _plan),
+            new TourStep("The wiki", "Opens the item's page on the Astrolabe wiki.", () => _wiki));
     }
 
     public void Toggle() => _win.Toggle();

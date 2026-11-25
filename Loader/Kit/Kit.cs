@@ -312,6 +312,29 @@ public static class Kit
         return box;
     }
 
+    /// <summary>
+    /// The first <paramref name="count"/> rows of a table, reusing the rows already there (cleared of old colours, icons
+    /// and tooltips) and dropping the rest. Refilling a table this way keeps its scroll position and selection, where
+    /// Clear() jumps back to the top every time.
+    /// </summary>
+    public static TreeItem[] Rows(Tree t, int count)
+    {
+        TreeItem root = t.GetRoot() ?? t.CreateItem();
+        var rows = new List<TreeItem>(root.GetChildren());
+        while (rows.Count > count) { TreeItem last = rows[^1]; rows.RemoveAt(rows.Count - 1); root.RemoveChild(last); last.Free(); }
+        foreach (TreeItem r in rows)
+            for (int c = 0; c < t.Columns; c++)
+            {
+                r.ClearCustomColor(c);
+                r.ClearCustomBgColor(c);
+                r.SetIcon(c, null);
+                r.SetTooltipText(c, "");
+                r.SetSelectable(c, true);
+            }
+        while (rows.Count < count) rows.Add(t.CreateItem(root));
+        return rows.ToArray();
+    }
+
     public static Control Spacer()
     {
         return new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, MouseFilter = Control.MouseFilterEnum.Ignore };

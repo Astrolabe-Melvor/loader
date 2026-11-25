@@ -169,6 +169,14 @@ sealed class BeaconWindow
 
         _win.Opened += () => { FillPicks(); Refresh(); };
         _w.Raised += (_, _) => { if (_win.Visible) Refresh(); };
+        _win.SetTour(
+            new TourStep("What Beacon does", "Beacon tells you when the game needs you: a level up, a pet, food running low, the bank filling up, your character standing idle, Course finishing its queue, a rare drop."),
+            new TourStep("Each alert", "One row per alert. Tick [b]On screen[/b] for a note in the corner, pick a [b]Sound[/b] (▶ plays it), and its own volume.", () => grid),
+            new TourStep("Away from the game", "[b]Taskbar[/b] flashes the game's taskbar button while you're in another window. [b]Discord[/b] posts the alert to your channel.", () => grid),
+            new TourStep("Thresholds", "[b]At[/b] sets when some alerts fire: how much food is left, how many bank slots, how long idle. [b]Test[/b] fires the alert so you can hear and see it.", () => grid),
+            new TourStep("Volume", "Beacon's own volume, apart from the game's. Your own .ogg, .wav or .mp3 files in mods\\Beacon\\sounds show up after [b]Find new sounds[/b].", () => vol),
+            new TourStep("Discord", "Paste a channel webhook URL to get alerts on your phone. It stays on this computer.", () => hook),
+            new TourStep("Recent alerts", "What Beacon told you lately, newest first.", () => _recent));
     }
 
     CheckBox Check(bool on, Action<bool> set)

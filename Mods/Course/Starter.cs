@@ -98,6 +98,9 @@ static class Starter
     {
         ActionComponent? comp = Component(game, r);
         if (comp == null || !comp.IsStarted) return false;
+        // Agility: the right course on a different path (Simple instead of Advanced) is not this step.
+        if (comp is AgilityActionComponent ag && r.Area.Length > 0 && ag.CurrentPath is { } cp && cp.Course.Course.Id == r.Target)
+            return cp.Path.Id == r.Area;
         string? now = comp.CurrentDescription?.Id;
         return now == r.Target || (r.Area.Length > 0 && now == r.Area);
     }
@@ -204,7 +207,7 @@ static class Starter
         {
             var rates = data.Rates.Where(r => r.Skill == skill.Name || r.Skill == Catalog.Local(skill.Id))
                 .GroupBy(r => Catalog.Local(r.Id[(r.Id.IndexOf(':') + 1)..])).ToDictionary(g => g.Key, g => g.First());
-            foreach (ActionChoice a in skill.Actions.Where(a => !a.LockedNow))
+            foreach (ActionChoice a in skill.Actions.Where(a => !a.LockedNow).DistinctBy(a => a.Ref.Target))
             {
                 if (!rates.TryGetValue(Catalog.Local(a.Ref.Target), out var r)) continue;
                 if (r.In.Any(i => !full.TryGetValue(i.Item, out string? fid) || Queue.BankCount(game, fid) <= 0)) continue;

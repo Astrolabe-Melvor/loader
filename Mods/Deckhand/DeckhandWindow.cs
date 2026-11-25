@@ -85,6 +85,13 @@ sealed class DeckhandWindow
         var timer = new Godot.Timer { WaitTime = 3, Autostart = true };
         timer.Timeout += () => { if (_win.Visible) Refresh(); };
         _win.Root.AddChild(timer);
+
+        _win.SetTour(
+            new TourStep("What Deckhand does", "Deckhand does the small upkeep jobs so you don't have to keep checking: petting and repairing in Ranching, keeping the grain mill running, and warning you about farming problems."),
+            new TourStep("Ranching", "Pet animals when they want it, and repair enclosures before maintenance gets low. Repairs never take your GP below the amount you set.", () => ranch.GetParent() as Control),
+            new TourStep("Grain mill", "Pick what the mill makes; switching handles the stop and collect for you. Deckhand can restart it and refill it from the bank.", () => mill.GetParent() as Control),
+            new TourStep("Farming", "With Beacon installed, you get an alert when automation can't be paid for, a harvest finds the bank full, or compost runs out.", () => farm.GetParent() as Control),
+            new TourStep("What it did", "Every job Deckhand did, newest first.", () => _log));
     }
 
     public void Toggle() => _win.Toggle();
