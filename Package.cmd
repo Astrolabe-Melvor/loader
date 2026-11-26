@@ -22,6 +22,8 @@ set "L=%STAGE%\loader"
 echo Building Astrolabe Loader %LVER%...
 dotnet publish "%~dp0Loader\Loader.csproj" -c Release -o "%L%\data_MelvorModLoader_windows_x86_64" "-p:GameDir=%GAME%" -nologo -v:quiet
 if errorlevel 1 ( echo Loader build failed. & pause & exit /b 1 )
+rem createdump.exe (the runtime's crash-dump helper) is never used, and mod sites quarantine any .exe.
+if exist "%L%\data_MelvorModLoader_windows_x86_64\createdump.exe" del /q "%L%\data_MelvorModLoader_windows_x86_64\createdump.exe"
 (
   echo [dotnet]
   echo.
