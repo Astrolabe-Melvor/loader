@@ -230,7 +230,8 @@ sealed class LogWindow
             r.SetIcon(0, SkillIcon(game, id));
             r.SetText(1, line.Xp > 0 ? Num(line.Xp) : "");
             double rate = _t.RecentXpPerHour(id);
-            r.SetText(2, line.Xp > 0 ? Num(rate) : "");
+            r.SetText(2, line.Xp <= 0 ? "" : rate > 0 ? Num(rate) : "idle");
+            if (line.Xp > 0 && rate <= 0) r.SetCustomColor(2, Kit.Dim);
             r.SetTooltipText(2, line.Xp > 0 ? $"Last 10 minutes. Whole session: {Num(line.Xp / s.Hours)} per hour." : "");
             r.SetText(3, line.Level == 0 ? "" : line.Level > line.StartLevel ? $"{line.StartLevel} → {line.Level}" : line.Level.ToString());
             if (line.Level > line.StartLevel) r.SetCustomColor(3, Kit.Good);

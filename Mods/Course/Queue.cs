@@ -772,7 +772,15 @@ sealed class Queue
 
     /// <summary>"Woodcutting: Mahogany Tree", or for a train-a-skill step "Train Woodcutting (Mahogany Tree)".</summary>
     public static string Label(Step s) =>
-        s.IsBest || s.IsSlayer ? s.Resolved != null ? $"{s.Action.Label} ({s.Resolved.Label[(s.Resolved.Label.IndexOf(':') + 1)..].Trim()})" : s.Action.Label : s.Action.Label;
+        s.IsBest || s.IsSlayer ? s.Resolved != null ? $"{s.Action.Label} ({Short(s.Resolved.Label)})" : s.Action.Label : s.Action.Label;
+
+    // "Agility: Jump 3 (best path) (Simple Path)" -> "Jump 3: Simple Path"
+    static string Short(string label)
+    {
+        string t = label[(label.IndexOf(':') + 1)..].Replace(" (best path)", "").Trim();
+        int p = t.LastIndexOf(" (", StringComparison.Ordinal);
+        return p > 0 && t.EndsWith(')') ? t[..p] + ": " + t[(p + 2)..^1] : t;
+    }
 
     void WearIdle(Game game)
     {
@@ -813,7 +821,7 @@ sealed class Queue
         }
 
         if (!s.Begun && s.Goal is Goal.Level or Goal.BankCount or Goal.Gold or Goal.Technique && Reached(game, s))
-            return Done(s, $"{s.Action.Label}: goal already met", "skipped");
+            return Done(s, $"{s.Action.Label}: goal already met", "already met");
 
         bool switched = false;
         // Slayer tasks: every few seconds apply the reroll/extend rules and fight the top task (a finished task moves on).

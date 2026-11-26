@@ -1,7 +1,13 @@
 # Changelog
 
+## 0.4.1
+- Course 0.12.1: a step whose goal was already met shows "already met" instead of a red "skipped". Agility best-path steps read "Train Agility (Jump 3: Simple Path)". The Add a step form says "Your character is doing" instead of "Right now", which read as the step's pick.
+- Hold 0.6.1: "1 rule", "1 stack" instead of "1 rules", "1 stacks".
+- Logbook 0.3.2: a skill with no XP in the last 10 minutes shows "idle" in XP per hour instead of 0.
+- Loader 0.4.1: no changes; the release number moves with the mods.
+
 ## 0.4.0
-- Every mod now runs on Astrolabe Loader or on Melvor Mod Loader (falorfrozen's). The window kit is built into each mod instead of the loader, so update the loader and all mods together. Window sizes, positions, scale and tours move to `mods\windows.json`.
+- Every mod now runs on Astrolabe Loader or on Melvor Mod Loader (falorfrozen's). The window kit is built into each mod instead of the loader, so update the loader and all mods together. Window sizes, positions, scale and tours move to `mods\windows.json`. The loader's log is now `AstrolabeLoader.log` in the game folder.
 - Course 0.12.0: the queue keeps going while the game catches up on time away; steps that reach their goal move on, History gets the time each happened, alerts play when you are back. A Queue button on every skill and combat page opens Add a step with that page's action picked (can be turned off in Options). The old Action Queue folder is only moved when it is ours.
 - Hold 0.6.0: Bury all and Open all on the Bank tab, with a confirm line listing what goes. Locked stacks and the amounts your rules keep are left alone.
 - Logbook 0.3.1, Beacon 0.4.1, Spyglass 0.2.1, Anchor 0.2.1, Deckhand 0.2.1: built with the kit inside.

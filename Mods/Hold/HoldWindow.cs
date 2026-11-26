@@ -349,7 +349,7 @@ sealed class HoldWindow
         _due.Text = _k.Book.Keep.Count == 0
             ? "No rules yet. Pick an item below the table to give it one."
             : due.Count == 0 ? $"{_k.Book.Keep.Count} rules. Nothing to sell right now."
-            : $"{_k.Book.Keep.Count} rules. Would sell {due.Count} stacks now for about {Num(due.Sum(d => d.Sell * d.Row.Price))} GP.";
+            : $"{_k.Book.Keep.Count} {(_k.Book.Keep.Count == 1 ? "rule" : "rules")}. Would sell {due.Count} {(due.Count == 1 ? "stack" : "stacks")} now for about {Num(due.Sum(d => d.Sell * d.Row.Price))} GP.";
         _sellRules.Disabled = due.Count == 0;
         Fill();
     }

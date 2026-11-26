@@ -2,6 +2,10 @@ Extract the zips into the Melvor Idle 2 game folder (next to Melvor2.exe): the l
 
 Already using Melvor Mod Loader? Keep it and extract only the mod zips you want. Astrolabe mods now run on either loader. Update all Astrolabe mods together with this release.
 
+## 0.4.1 fixes
+- Course 0.12.1: steps whose goal was already met show "already met" instead of a red "skipped"; clearer Agility best-path names.
+- Hold 0.6.1 and Logbook 0.3.2: small wording fixes ("1 rule"; "idle" instead of 0 XP per hour).
+
 ## Course 0.12.0
 - Runs while the game is closed: when the game catches up on time away, steps that reach their goal move on to the next. History shows when each happened; alerts play once you are back.
 - A Queue button on every skill and combat page opens Add a step with that page's action already picked. Options can turn it off.

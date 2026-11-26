@@ -564,7 +564,7 @@ sealed class QueueWindow
         _add.Text = _editing >= 0 ? "Save changes" : "Add step";
         _cancelEdit.Visible = _editing >= 0;
         ActionRef? now = game == null ? null : Starter.Current(game);
-        _now.Text = game == null ? "Load a character to pick actions." : "Right now: " + (now?.Label ?? "nothing");
+        _now.Text = game == null ? "Load a character to pick actions." : "Your character is doing: " + (now?.Label ?? "nothing");
         UpdateSummary();
     }
 

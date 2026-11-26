@@ -4,7 +4,7 @@
     <AssemblyName>MelvorModLoader</AssemblyName>
     <RootNamespace>MelvorModLoader</RootNamespace>
     <AssemblyVersion>0.1.0.0</AssemblyVersion>
-    <Version>0.4.0</Version>
+    <Version>0.4.1</Version>
     <Product>Astrolabe Loader</Product>
     <Description>Astrolabe Loader: mod loader for Melvor Idle 2.</Description>
     <Copyright>Copyright (c) 2026 Elocrypt</Copyright>
