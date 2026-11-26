@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4
+- Course 0.13.0: Most GP and Fastest XP have a Materials choice: use what's in the bank (as before), only actions that use nothing from the bank, or gather the ingredients itself. Self-funded steps rank by GP or XP per hour of your own time with gathering counted in, gather about 15 minutes' worth at a time in steps put in front of them, and never use the stock you already had. Add a step lists the top five picks right now with their GP or XP per hour, so you can see what it will choose. Actions that use up a toolbelt item (meteorite ore and its sightings log) count as using the bank, so the other two choices skip them. With the bank choice, Most GP and Fastest XP now also consider actions that only need a toolbelt item you have in the bank (before, they had to be in the toolbelt already); the step puts it in.
+- Planner data: fishing spots, thieving targets, potions and a few hunting animals had the wrong level (their area's, not their own), so Plan an item could plan actions you can't do yet. Fixed in the wiki's data; Course picks it up on its next daily download.
+- Loader 0.4.4: no changes; the release number moves with the mods.
+
 ## 0.4.3
 - Course 0.12.2: the planner data (used by Most GP, Fastest XP and Plan an item) never downloaded unless Astrolabe Tools was running: the download failed with "This instance has already started one or more requests". Fixed. Most GP and Fastest XP steps also load the planner data themselves. Before, a queue that started without the Course window being opened that session waited forever on "planner data not loaded". The waiting message now says why (downloading, or the download error). Steps above a "Run from here" now read "not run" or "stopped early" (if it was running) instead of "done", aren't counted as done, and stay when you click Remove finished.
 - Loader 0.4.3: no changes; the release number moves with the mods.

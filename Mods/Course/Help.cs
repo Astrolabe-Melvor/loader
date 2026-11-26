@@ -8,7 +8,7 @@ static class Help
 [b]Add a step[/b]
 From the game: every skill and combat page has a [b]Queue[/b] button in its top-right corner. It opens this tab with that skill and the page's selected recipe (or what's running there) picked, so you only choose the goal.
 Pick a skill and an action, then what "done" means: the bank holds an amount, you gain an amount, a skill reaches a level, it has been done a number of times, or time passes. Every list only offers what fits the action. The green line under the form says what the step will do; a gold line warns about anything that would stop it. [i]Copy what I'm doing[/i] fills in your current action.
-[b]Fastest XP[/b] and [b]Most GP[/b] pick the best action for the skill and switch as you level.
+[b]Fastest XP[/b] and [b]Most GP[/b] pick the best action for the skill and switch as you level. [i]Materials[/i] decides what they may use: [i]what's in the bank[/i]; [i]only actions that use nothing from the bank[/i] (gathering, thieving and the like); or [i]gather the ingredients itself[/i]. That last one ranks by GP or XP per hour of your own time, gathering counted in, and puts steps that gather about 15 minutes' worth of ingredients in front of it; when those run out it stops and gathers again. What you already had of each ingredient when the step started is never used, and finished gathering steps are cleared away each round.
 [b]Slayer tasks[/b] (Combat): fights the highest master's task it can, moves to the next task when one is done, until a number of tasks, a level or a time. [i]Undo[/i] under the step list takes back the last change (an edit, a move, a removal).
 
 [b]Thieving and Agility[/b]

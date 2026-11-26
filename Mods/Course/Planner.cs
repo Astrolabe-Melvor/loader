@@ -147,10 +147,14 @@ sealed class Planner
     /// <summary>A rough GP rate to turn shop prices into play time when comparing ways to get an item.</summary>
     const double GpPerHour = 100_000;
 
-    public Planner(PlanData data, Game game)
+    /// <summary>Self-funded: gather every ingredient (none taken from the bank, nothing bought).</summary>
+    readonly bool _self;
+
+    public Planner(PlanData data, Game game, bool selfFunded = false)
     {
         _data = data;
         _game = game;
+        _self = selfFunded;
         foreach (GameEntity e in game.Entities.GetAllObjects())
         {
             ExperienceComponent? xp = e.Components.Values.OfType<ExperienceComponent>().FirstOrDefault();
@@ -158,7 +162,7 @@ sealed class Planner
         }
         // Shop items bought with GP count as ingredients worth their price in play time, so actions that use them
         // (arena runs need Arena Entry Tickets) are not dropped as impossible.
-        foreach (var (item, gp) in ShopSource.GpPrices(game)) _shopHours[item] = gp / GpPerHour;
+        if (!_self) foreach (var (item, gp) in ShopSource.GpPrices(game)) _shopHours[item] = gp / GpPerHour;
         _costNow = Costs(anyLevel: false);
         _costAny = Costs(anyLevel: true);
     }
@@ -200,6 +204,13 @@ sealed class Planner
         return cost;
     }
 
+    /// <summary>
+    /// Hours of play to gather what one hour of <paramref name="r"/> uses, with what you can do now. Infinity when
+    /// something it needs can't be made at your levels. 0 for actions that use nothing.
+    /// </summary>
+    public double InputHours(PlanData.Rate r) =>
+        r.In.Sum(x => x.PerHour * (_costNow.TryGetValue(x.Item, out double c) ? c : double.PositiveInfinity));
+
     double UnitCost(string item) =>
         _costNow.TryGetValue(item, out double a) ? a : _costAny.TryGetValue(item, out double b) ? b : double.PositiveInfinity;
 
@@ -225,10 +236,44 @@ sealed class Planner
         return order.Select(k => lines[k]).ToList();
     }
 
+    /// <summary>
+    /// Several items at once ("own N in total" each), sharing what they have in common: the steps for all of them,
+    /// every line after the lines that make its ingredients.
+    /// </summary>
+    public List<PlanLine> PlanMany(IEnumerable<(string Item, int Target)> wants)
+    {
+        var lines = new Dictionary<string, PlanLine>();
+        var order = new List<string>();
+        _used.Clear();
+        foreach (var (item, target) in wants)
+        {
+            double need = Math.Max(0, target - Bank(item));
+            if (need > 0) Expand(item, need, lines, order, new HashSet<string>(), 0, root: true);
+        }
+        foreach (PlanLine l in lines.Values)
+        {
+            l.Have = Bank(l.Item);
+            l.Target = (int)Math.Ceiling(l.Have + l.Need);
+        }
+        // Ingredients first. Expanding a second item can move a shared ingredient after the first item's line.
+        var sorted = new List<PlanLine>();
+        var placed = new HashSet<string>();
+        var left = order.Select(k => lines[k]).ToList();
+        while (left.Count > 0)
+        {
+            PlanLine next = left.FirstOrDefault(l => l.Rate == null || l.Rate.In.All(i => !lines.ContainsKey(i.Item) || placed.Contains(i.Item))) ?? left[0];
+            sorted.Add(next);
+            placed.Add(next.Item);
+            left.Remove(next);
+        }
+        return sorted;
+    }
+
     void Expand(string item, double need, Dictionary<string, PlanLine> lines, List<string> order, HashSet<string> seen, int depth, bool root)
     {
-        // Ingredients already in the bank are used first (the item asked for is always made in full).
-        if (!root)
+        // Ingredients already in the bank are used first (the item asked for is always made in full). Self-funded
+        // plans leave the bank alone and gather everything.
+        if (!root && !_self)
         {
             double used = _used.TryGetValue(item, out double u) ? u : 0;
             double take = Math.Min(Math.Max(0, Bank(item) - used), need);
@@ -262,7 +307,7 @@ sealed class Planner
         }
         line.Need += need;
 
-        if (best == null && ShopSource.For(_game, item) is { } buy)
+        if (best == null && !_self && ShopSource.For(_game, item) is { } buy)
         {
             // No skill makes it, but the shop sells it: earn what it costs, then buy it.
             string full = buy.Provides.Items.First(i => Catalog.Local(i.Item.Id) == item).Item.Id;
@@ -334,7 +379,7 @@ sealed class Planner
         order.Add(item);   // after its ingredients
     }
 
-    ActionRef? ToAction(PlanData.Rate r)
+    public ActionRef? ToAction(PlanData.Rate r)
     {
         string local = r.Id.Contains(':') ? r.Id[(r.Id.IndexOf(':') + 1)..] : r.Id;
         // Most rates are "Skill:Action". Agility runs are "Agility:Course:Path": match the path, then the course.

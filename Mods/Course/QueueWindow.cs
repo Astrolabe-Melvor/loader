@@ -30,8 +30,9 @@ sealed class QueueWindow
     SlayerPanel _slayer = null!;
     readonly BeltEditor _beltEditor;
     readonly OptionButton _belt;
-    readonly HBoxContainer _beltRow, _goldRow;
+    readonly HBoxContainer _beltRow, _goldRow, _fundRow;
     readonly CheckBox _sellOut;
+    readonly OptionButton _funding;
     int _tab;
     bool _tabPinned;   // the player opened a tab while the queue runs (otherwise tabs fold away to give the table room)
 
@@ -146,6 +147,14 @@ sealed class QueueWindow
         _sellOut.Toggled += _ => UpdateSummary();
         _goldRow = Kit.Row(Field("gold"), _sellOut);
         addBox.AddChild(_goldRow);
+        _funding = new OptionButton { CustomMinimumSize = new Vector2(460, 0),
+            TooltipText = "What Most GP and Fastest XP may use. Gathering keeps what you had: it stops making when only your old stock is left and gathers more first." };
+        _funding.AddItem("Use what's in the bank");
+        _funding.AddItem("Only actions that use nothing from the bank");
+        _funding.AddItem("Gather the ingredients itself (your bank stock is left alone)");
+        _funding.ItemSelected += _ => UpdateSummary();
+        _fundRow = Kit.Row(Field("materials"), _funding);
+        addBox.AddChild(_fundRow);
         _beltRow = Kit.Row(Field("toolbelt"), _belt, WithTip(Kit.Btn("Edit sets", () => { _tabPinned = true; ShowTab(5); }), "Open the Toolbelts tab"));
         addBox.AddChild(_beltRow);
         _combatNote = Wrapped("");
@@ -552,6 +561,7 @@ sealed class QueueWindow
         bool belted = !sell && !combat && game != null && a != null && !_do.IsBest && Belts.HasToolbelt(game, a.Entity);
         _beltRow.Visible = belted;
         _goldRow.Visible = !sell && _do.IsGold;
+        _fundRow.Visible = !sell && _do.IsBest && !_do.IsTech;
         if (belted) FillBelt(a!.Entity, _belt.ItemCount > 0 ? SelectedBelt : "");
         if (combat)
         {
@@ -654,13 +664,24 @@ sealed class QueueWindow
                 else warn.Add($"Needs {what}, and there is none in the bank: get one first.");
             }
             // Locked only by a toolbelt item the step will put in place is not really locked.
-            bool lockedByBeltOnly = belt.Count > 0 && belt.All(n => n.Have > 0) && _do.SelectedChoice?.Key is object key && OnlyBelt(key);
+            bool lockedByBeltOnly = belt.Count > 0 && belt.All(n => n.Have > 0) && _do.SelectedChoice?.Key is object key && Toolbelt.OnlyBelt(key);
             if (s.IsGold)
             {
-                text += ". Picks what makes the most GP per hour from what you can do with what is in the bank, and switches as you level"
-                    + (s.SellOutput ? "; sells what it makes" : "; keeps what it makes (sell it with Hold or by hand)");
+                text += ". Picks what makes the most GP per hour " + s.Funding switch
+                {
+                    Funding.None => "from actions that use nothing from the bank",
+                    Funding.Self => "counting the time to gather the ingredients, gathers them first and never touches your bank stock of them",
+                    _ => "from what you can do with what is in the bank",
+                } + ", and switches as you level" + (s.SellOutput ? "; sells what it makes" : "; keeps what it makes (sell it with Hold or by hand)");
                 if (PlanData.Get(_queue.Folder, _queue.Log) == null) warn.Add("The planner's data is not loaded yet, so it cannot rank actions by GP.");
             }
+            else if (s.IsBest && !s.IsTech && s.Funding != Funding.Bank)
+            {
+                text += s.Funding == Funding.None ? ". Only actions that use nothing from the bank"
+                    : ". Ranks by XP per hour counting the time to gather the ingredients, gathers them first and never touches your bank stock of them";
+                if (PlanData.Get(_queue.Folder, _queue.Log) == null) warn.Add("The planner's data is not loaded yet, so it cannot rank actions.");
+            }
+            if (s.IsBest && !s.IsTech) text += TopPicks(game, s);
             if (_do.SelectedChoice?.LockedNow == true && !lockedByBeltOnly)
                 warn.Add("You cannot do this yet. The step will wait for it; put a step that trains the skill before it.");
             if (s.Goal == Goal.Level && Queue.Level(game, s.Skill) >= s.Amount)
@@ -699,24 +720,6 @@ sealed class QueueWindow
         _summary.AddThemeColorOverride("font_color", warn.Count == 0 ? Kit.Good : Kit.Gold);
     }
 
-    /// <summary>True when every unmet requirement of the action is a toolbelt item.</summary>
-    static bool OnlyBelt(object key)
-    {
-        try
-        {
-            foreach (object? o in new[] { key, key.GetType().GetProperty("Recipe")?.GetValue(key) })
-            {
-                if (o == null) continue;
-                foreach (string p in new[] { "Requirements", "UnlockRequirements" })
-                    if (o.GetType().GetProperty(p)?.GetValue(o) is GamesByMalcs.Melvor2.Conditions.ConditionGroup g
-                        && g.Conditions.Any(c => !c.IsMet && c is not GamesByMalcs.Melvor2.Components.Toolbelt.Conditions.ToolbeltItemEquippedCondition))
-                        return false;
-            }
-        }
-        catch { return false; }
-        return true;
-    }
-
     Step? BuildStep()
     {
         if (_do.IsSell)
@@ -738,6 +741,7 @@ sealed class QueueWindow
             Gear = fight ? SelectedGear : Gear.SkillDefault, Weapon = fight ? SelectedWeapon : "", Stance = fight ? SelectedStance : "",
             Belt = _beltRow.Visible ? SelectedBelt : "",
             SellOutput = !_goldRow.Visible || _sellOut.ButtonPressed,
+            Funding = _fundRow.Visible ? (Funding)Math.Max(0, _funding.Selected) : Funding.Bank,
         };
         if (s.Goal is Goal.Level or Goal.BankCount or Goal.MoreItems)
         {
@@ -793,6 +797,7 @@ sealed class QueueWindow
             FillStances(game, s.Stance);
             if (!s.IsSell) FillBelt(s.Action.Entity, s.Belt);
             _sellOut.ButtonPressed = s.SellOutput;
+            _funding.Select((int)s.Funding);
             RefreshTargets(s.Goal == Goal.Level ? s.Skill : s.Item);
             _amount.MinValue = 0;
             _amount.MaxValue = 10_000_000;
@@ -1300,6 +1305,18 @@ sealed class QueueWindow
         string st = s.Stance == CombatSetup.Best ? ", best stance"
             : s.Stance.Length > 0 ? ", " + (CombatSetup.AllStances(game).FirstOrDefault(x => x.Id == s.Stance)?.DisplayName.ToString() ?? s.Stance) : "";
         return s.Weapon == CombatSetup.Best ? w + " and stance" : w + st;
+    }
+
+    /// <summary>What Most GP or Fastest XP would pick now, best first, with its rate: so you can see why.</summary>
+    static string TopPicks(Game game, Step s)
+    {
+        if (PlanData.Loaded == null) return "";
+        var picks = s.IsGold
+            ? Starter.GoldScored(game, s.Action.Entity, s.Funding).Take(5).Select(x => (x.Ref, Value: x.Gp, Unit: "GP")).ToList()
+            : Starter.BestScored(game, s.Action.Entity, s.Funding).Take(5).Select(x => (x.Ref, Value: x.Xp, Unit: "XP")).ToList();
+        if (picks.Count == 0) return ". Nothing fits right now";
+        return ". Top picks now: " + string.Join(", ", picks.Select((x, i) =>
+            $"{i + 1}. {x.Ref.Label}" + (double.IsNaN(x.Value) ? "" : $" ({x.Value:N0} {x.Unit}/h)")));
     }
 
     string StateText(Game? game, Step s, bool current)

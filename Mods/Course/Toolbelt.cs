@@ -28,6 +28,54 @@ static class Toolbelt
         }
     }
 
+    /// <summary>
+    /// The action needs a toolbelt item that gets used up (a sightings log for meteorite ore and the like), which
+    /// comes from the bank whether or not it is in place now.
+    /// </summary>
+    public static bool UsesConsumable(Game game, ActionRef r)
+    {
+        object? data = Catalog.DataOf(game, r);
+        if (data == null) return false;
+        try
+        {
+            foreach (ConditionGroup g in Groups(data))
+                foreach (Condition c in g.Conditions)
+                    if (c is ToolbeltItemEquippedCondition t && Belts.IsConsumable(t.Item)) return true;
+        }
+        catch { }
+        return false;
+    }
+
+    /// <summary>True when every unmet requirement of the action is a toolbelt item.</summary>
+    public static bool OnlyBelt(object key)
+    {
+        try
+        {
+            foreach (object? o in new[] { key, key.GetType().GetProperty("Recipe")?.GetValue(key) })
+            {
+                if (o == null) continue;
+                foreach (string p in new[] { "Requirements", "UnlockRequirements" })
+                    if (o.GetType().GetProperty(p)?.GetValue(o) is GamesByMalcs.Melvor2.Conditions.ConditionGroup g
+                        && g.Conditions.Any(c => !c.IsMet && c is not GamesByMalcs.Melvor2.Components.Toolbelt.Conditions.ToolbeltItemEquippedCondition))
+                        return false;
+            }
+        }
+        catch { return false; }
+        return true;
+    }
+
+    /// <summary>
+    /// Open now, or locked only by toolbelt items the bank has (Meteorite Ore with sightings logs in the bank): the step
+    /// puts them in place before it starts the action.
+    /// </summary>
+    public static bool Usable(Game game, ActionChoice a)
+    {
+        if (!a.LockedNow) return true;
+        if (a.Key == null || !OnlyBelt(a.Key)) return false;
+        List<Need> m = Missing(game, a.Ref);
+        return m.Count > 0 && m.All(n => n.Have > 0);
+    }
+
     /// <summary>Toolbelt items the action needs that are not in place yet.</summary>
     public static List<Need> Missing(Game game, ActionRef r)
     {

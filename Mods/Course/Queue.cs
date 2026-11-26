@@ -28,6 +28,14 @@ public enum Goal
     Technique,    // until an Agility technique (Item) reaches level N
 }
 
+/// <summary>Most GP and Fastest XP: what the picked actions may use from the bank.</summary>
+public enum Funding
+{
+    Bank,      // anything whose ingredients are in the bank
+    None,      // only actions that use nothing (gathering, thieving...)
+    Self,      // gather the ingredients first, then make; your existing stock is left alone
+}
+
 public sealed class Step
 {
     public ActionRef Action { get; set; } = new();
@@ -84,6 +92,14 @@ public sealed class Step
     [JsonIgnore] public bool IsGold => Action.Target == Starter.GoldTarget;
     /// <summary>Most GP steps: sell what the action makes as it comes in (never locked bank stacks).</summary>
     public bool SellOutput { get; set; } = true;
+    /// <summary>Most GP and Fastest XP: what the picked actions may use from the bank.</summary>
+    public Funding Funding { get; set; }
+    /// <summary>Self-funded: bank stock of each ingredient when the step started using it. Making stops there.</summary>
+    public Dictionary<string, int> Reserve { get; set; } = new();
+    /// <summary>Put in by a self-funded step to gather its ingredients; removed once done, at the next round.</summary>
+    public bool Gather { get; set; }
+    [JsonIgnore] public double GatherWindowStart { get; set; }
+    [JsonIgnore] public int Gathers { get; set; }
     /// <summary>The action to run: the step's own, or for "train a skill" the one picked for now.</summary>
     [JsonIgnore] public ActionRef Effective => IsBest || IsSlayer ? Resolved ?? Action : Action;
     /// <summary>What the Times goal counts: finished tasks for a Slayer tasks step, else the skill's actions (kills in combat).</summary>
@@ -106,7 +122,7 @@ public sealed class Step
 
     public Step Copy() => new()
     {
-        Action = Action, Goal = Goal, Amount = Amount, Skill = Skill, SkillName = SkillName, Item = Item, ItemName = ItemName, Gear = Gear, Weapon = Weapon, Stance = Stance, Belt = Belt, SellOutput = SellOutput,
+        Action = Action, Goal = Goal, Amount = Amount, Skill = Skill, SkillName = SkillName, Item = Item, ItemName = ItemName, Gear = Gear, Weapon = Weapon, Stance = Stance, Belt = Belt, SellOutput = SellOutput, Funding = Funding,
     };
 
     public void Reset()
@@ -117,6 +133,8 @@ public sealed class Step
         RetryAt = LastRestart = BestCheckAt = 0;
         Resolved = null;
         FailedUntil.Clear();
+        Reserve.Clear();
+        Gathers = 0;
     }
 }
 
@@ -779,7 +797,8 @@ sealed class Queue
 
     /// <summary>"Woodcutting: Mahogany Tree", or for a train-a-skill step "Train Woodcutting (Mahogany Tree)".</summary>
     public static string Label(Step s) =>
-        s.IsBest || s.IsSlayer ? s.Resolved != null ? $"{s.Action.Label} ({Short(s.Resolved.Label)})" : s.Action.Label : s.Action.Label;
+        (s.IsBest || s.IsSlayer ? s.Resolved != null ? $"{s.Action.Label} ({Short(s.Resolved.Label)})" : s.Action.Label : s.Action.Label)
+        + (!s.IsBest ? "" : s.Funding == Funding.None ? ", nothing from the bank" : s.Funding == Funding.Self ? ", self-funded" : "");
 
     // "Agility: Jump 3 (best path) (Simple Path)" -> "Jump 3: Simple Path"
     static string Short(string label)
@@ -861,7 +880,7 @@ sealed class Queue
             // Most GP and Fastest XP rank actions by the planner's rates. The Course window starts loading them, but
             // a queue that runs from the start of a session may never have had the window open.
             PlanData.Get(Folder, Log);
-            ActionRef? top = Starter.BestFor(game, s.Action.Entity, s.Action.Target)
+            ActionRef? top = Starter.BestFor(game, s.Action.Entity, s.Action.Target, s.Funding)
                 .FirstOrDefault(c => !s.FailedUntil.TryGetValue(c.Target, out double until) || now >= until);
             if (top != null && (s.Resolved == null || s.Resolved.Target != top.Target || s.Resolved.Area != top.Area))
             {
@@ -873,7 +892,10 @@ sealed class Queue
             if (top == null && s.Resolved == null)
             {
                 s.Waiting = true;
-                s.State = s.IsGold ? (PlanData.Loaded == null ? "waiting for the planner data (" + PlanData.State + ")" : "waiting: nothing makes GP with what you have") : "waiting: nothing to train yet";
+                s.State = PlanData.Loaded == null && (s.IsGold || s.Funding != Funding.Bank) ? "waiting for the planner data (" + PlanData.State + ")"
+                    : s.Funding == Funding.None ? "waiting: everything here uses something from the bank"
+                    : s.Funding == Funding.Self ? "waiting: nothing here can be gathered for at your levels"
+                    : s.IsGold ? "waiting: nothing makes GP with what you have" : "waiting: nothing to train yet";
             }
             // Most GP: turn what it made into GP.
             if (s.IsGold && s.SellOutput && s.Resolved != null)
@@ -882,6 +904,9 @@ sealed class Queue
         }
         ActionRef act = s.Effective;
         if ((s.IsBest || s.IsSlayer) && s.Resolved == null) return switched;
+
+        // Self-funded: out of what this step gathered, so gather more before making again.
+        if (s.IsBest && s.Funding == Funding.Self && SelfFund(game, s, act, index, now)) return true;
 
         if (!s.Begun || s.Waiting)
         {
@@ -936,7 +961,7 @@ sealed class Queue
                     s.FailedUntil[act.Target] = now + 120;
                     s.Resolved = null;
                     s.BestCheckAt = 0;
-                    if (Starter.BestFor(game, s.Action.Entity, s.Action.Target).Any(c => !s.FailedUntil.TryGetValue(c.Target, out double u) || now >= u)) return true;
+                    if (Starter.BestFor(game, s.Action.Entity, s.Action.Target, s.Funding).Any(c => !s.FailedUntil.TryGetValue(c.Target, out double u) || now >= u)) return true;
                 }
                 // Cannot start (usually missing materials or a level). Wait and retry; give up after about 10 minutes,
                 // or after a minute when nothing else could use the time.
@@ -1038,6 +1063,70 @@ sealed class Queue
         s.RetryAt = 0;
         s.State = $"waiting: making {need.Refill:N0} {name}";
         Note($"{Label(s)}: out of {name}; making {need.Refill:N0} first ({steps.Count} step{(steps.Count == 1 ? "" : "s")}), then back to this");
+        return true;
+    }
+
+    /// <summary>How much making each round of gathering is for, in hours.</summary>
+    const double GatherHours = 0.25;
+
+    /// <summary>
+    /// Self-funded Most GP and Fastest XP: the ingredients of the picked action come from gathering, never from what
+    /// was already in the bank. The bank count of each ingredient when the step first uses it is kept aside; when
+    /// what is above it runs out, making stops and steps that gather about <see cref="GatherHours"/> of making's worth
+    /// are put in front of this one. Returns true when it did something this tick.
+    /// </summary>
+    bool SelfFund(Game game, Step s, ActionRef act, int index, double now)
+    {
+        PlanData? data = PlanData.Loaded;
+        if (data == null || Starter.RateFor(game, data, act) is not { } rate || rate.In.Count == 0) return false;
+        var ids = Catalog.Items(game).Select(i => i.Id).ToList();
+        var wants = new List<(string Local, string Full, double PerHour)>();
+        foreach (var (local, perHour) in rate.In)
+        {
+            string? full = ids.FirstOrDefault(id => Catalog.Local(id) == local);
+            if (full == null) return false;
+            wants.Add((local, full, perHour));
+        }
+        bool low = false;
+        foreach (var w in wants)
+        {
+            int have = BankCount(game, w.Full);
+            if (!s.Reserve.TryGetValue(w.Full, out int keep)) s.Reserve[w.Full] = keep = have;   // what you had stays yours
+            if (have <= keep) low = true;
+        }
+        if (!low) return false;
+
+        if (Starter.IsRunning(game, act)) Starter.Component(game, act)?.TryStop(true);
+        if (now - s.GatherWindowStart > 1800) { s.GatherWindowStart = now; s.Gathers = 0; }
+        var planner = new Planner(data, game, selfFunded: true);
+        List<PlanLine> lines = planner.PlanMany(wants.Select(w => (w.Local, s.Reserve[w.Full] + Math.Max(1, (int)Math.Ceiling(w.PerHour * GatherHours)))));
+        planner.ResolveIds(lines);
+        List<Step> steps = lines.Any(l => l.Problem.Length > 0) ? new() : planner.ToSteps(lines);
+        // No way to gather it, or rounds of gathering that don't last (a gather step keeps being skipped): pick
+        // another action for a while.
+        if (steps.Count == 0 || ++s.Gathers > 4)
+        {
+            Note($"{Label(s)}: can't keep {act.Label} supplied by gathering; trying something else");
+            s.FailedUntil[act.Target] = now + 1800;
+            s.Resolved = null;
+            s.BestCheckAt = 0;
+            s.Gathers = 0;
+            s.Waiting = true;
+            s.RetryAt = 0;
+            return true;
+        }
+        foreach (Step g in steps) g.Gather = true;
+        Edit(() =>
+        {
+            // Last round's gathering steps are done: take them out so the queue doesn't fill up with them.
+            var old = State.Steps.Take(State.Steps.IndexOf(s)).Where(x => x.Gather && x.Done).ToHashSet();
+            State.Steps.RemoveAll(old.Contains);
+            State.Steps.InsertRange(State.Steps.IndexOf(s), steps);
+        });
+        s.Waiting = true;
+        s.RetryAt = 0;
+        s.State = "waiting: gathering the ingredients first";
+        Note($"{Label(s)}: gathering the ingredients for {act.Label} ({steps.Count} step{(steps.Count == 1 ? "" : "s")}), then making");
         return true;
     }
 

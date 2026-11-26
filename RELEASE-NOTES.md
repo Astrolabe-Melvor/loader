@@ -2,6 +2,9 @@ Extract the zips into the Melvor Idle 2 game folder (next to Melvor2.exe): the l
 
 Already using Melvor Mod Loader? Keep it and extract only the mod zips you want. Astrolabe mods now run on either loader. Update all Astrolabe mods together with this release.
 
+## 0.4.4
+- Course 0.13.0: Most GP and Fastest XP can now use only actions that need nothing from the bank, or gather their own ingredients first (self-funded, ranked by GP or XP per hour of your own time, and your existing stock is left alone). Pick it under "materials" when adding the step. Add a step also shows the top five picks right now, with their GP or XP per hour.
+
 ## 0.4.3 fixes
 - Course 0.12.2: the planner data now downloads without Astrolabe Tools running. Before, Most GP, Fastest XP and Plan an item waited on "planner data not loaded" for most players. Steps above a "Run from here" no longer show as "done".
 

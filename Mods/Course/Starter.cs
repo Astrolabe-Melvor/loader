@@ -194,10 +194,15 @@ static class Starter
     /// The actions that make the most GP per hour now: what they make at its sell price, minus what they use. Only
     /// actions you can do and whose inputs are in the bank. <paramref name="entityId"/> "*any": every skill.
     /// </summary>
-    public static List<ActionRef> GoldFor(Game game, string entityId)
+    public static List<ActionRef> GoldFor(Game game, string entityId, Funding funding = Funding.Bank) =>
+        GoldScored(game, entityId, funding).Select(x => x.Ref).ToList();
+
+    /// <summary>Most GP's ranking with each action's GP per hour (of your own time when self-funded).</summary>
+    public static List<(ActionRef Ref, double Gp)> GoldScored(Game game, string entityId, Funding funding = Funding.Bank)
     {
         PlanData? data = PlanData.Loaded;
         if (data == null) return new();
+        Planner? self = funding == Funding.Self ? SelfPlanner(game, data) : null;
         var skills = Catalog.Skills(game).Where(s => entityId == AnyEntity ? !Gear.IsCombat(game, s.Id) : s.Id == entityId).ToList();
         var full = Catalog.Items(game).GroupBy(i => Catalog.Local(i.Id)).ToDictionary(g => g.Key, g => g.First().Id);
         double Price(string local) =>
@@ -207,42 +212,108 @@ static class Starter
         {
             var rates = data.Rates.Where(r => r.Skill == skill.Name || r.Skill == Catalog.Local(skill.Id))
                 .GroupBy(r => Catalog.Local(r.Id[(r.Id.IndexOf(':') + 1)..])).ToDictionary(g => g.Key, g => g.First());
-            foreach (ActionChoice a in skill.Actions.Where(a => !a.LockedNow).DistinctBy(a => a.Ref.Target))
+            foreach (ActionChoice a in skill.Actions.Where(a => funding == Funding.Bank ? Toolbelt.Usable(game, a) : !a.LockedNow).DistinctBy(a => a.Ref.Target))
             {
                 if (!rates.TryGetValue(Catalog.Local(a.Ref.Target), out var r)) continue;
-                if (r.In.Any(i => !full.TryGetValue(i.Item, out string? fid) || Queue.BankCount(game, fid) <= 0)) continue;
-                double gp = r.Out.Sum(o => o.PerHour * Price(o.Item)) - r.In.Sum(i => i.PerHour * Price(i.Item));
+                if (funding != Funding.Bank && Toolbelt.UsesConsumable(game, a.Ref)) continue;
+                double sales = r.Out.Sum(o => o.PerHour * Price(o.Item));
+                double gp;
+                switch (funding)
+                {
+                    case Funding.None:
+                        if (r.In.Count > 0) continue;
+                        gp = sales;
+                        break;
+                    case Funding.Self:
+                        // GP per hour of your own time: sales over the hour of making plus the hours of gathering.
+                        double ih = self!.InputHours(r);
+                        if (double.IsInfinity(ih)) continue;
+                        gp = sales / (1 + ih);
+                        break;
+                    default:
+                        if (r.In.Any(i => !full.TryGetValue(i.Item, out string? fid) || Queue.BankCount(game, fid) <= 0)) continue;
+                        gp = sales - r.In.Sum(i => i.PerHour * Price(i.Item));
+                        break;
+                }
                 if (gp > 0) scored.Add((a.Ref, gp));
             }
         }
-        return scored.OrderByDescending(x => x.Gp).Select(x => x.Ref).ToList();
+        return scored.OrderByDescending(x => x.Gp).ToList();
     }
 
     public static List<ActionRef> BestFor(Game game, string entityId, bool gold) => gold ? GoldFor(game, entityId) : BestFor(game, entityId);
 
     /// <summary>For a step: Most GP, train a technique (Agility), or Fastest XP.</summary>
-    public static List<ActionRef> BestFor(Game game, string entityId, string target) =>
-        target == GoldTarget ? GoldFor(game, entityId)
+    public static List<ActionRef> BestFor(Game game, string entityId, string target, Funding funding = Funding.Bank) =>
+        target == GoldTarget ? GoldFor(game, entityId, funding)
         : target.StartsWith(Finesse.TechPrefix) ? Finesse.BestForTechnique(game, target[Finesse.TechPrefix.Length..])
-        : BestFor(game, entityId);
+        : BestFor(game, entityId, funding);
 
-    public static List<ActionRef> BestFor(Game game, string entityId)
+    public static List<ActionRef> BestFor(Game game, string entityId, Funding funding = Funding.Bank) =>
+        BestScored(game, entityId, funding).Select(x => x.Ref).ToList();
+
+    /// <summary>Fastest XP's ranking with each action's XP per hour (NaN where the plan has no rate: Thieving, Agility).</summary>
+    public static List<(ActionRef Ref, double Xp)> BestScored(Game game, string entityId, Funding funding = Funding.Bank)
     {
-        // Thieving and Agility: rank by the game's live success chances instead of the plan's base rates.
-        if (Finesse.BestFor(game, entityId) is { } live) return live;
+        // Thieving and Agility: rank by the game's live success chances instead of the plan's base rates (they use
+        // nothing from the bank, so every funding choice allows them).
+        if (Finesse.BestFor(game, entityId) is { } live) return live.Select(r => (r, double.NaN)).ToList();
         SkillChoice? skill = Catalog.Skills(game).FirstOrDefault(s => s.Id == entityId);
         if (skill == null) return new();
-        var open = skill.Actions.Select((a, i) => (a, i)).Where(x => !x.a.LockedNow).ToList();
+        var open = skill.Actions.Select((a, i) => (a, i)).Where(x => funding == Funding.Bank ? Toolbelt.Usable(game, x.a) : !x.a.LockedNow).ToList();
         PlanData? data = PlanData.Loaded;
         if (data != null)
         {
+            Planner? self = funding == Funding.Self ? SelfPlanner(game, data) : null;
             var xp = new Dictionary<string, double>();
             foreach (var r in data.Rates)
-                if (r.Skill == skill.Name || r.Skill == Catalog.Local(skill.Id)) xp[Catalog.Local(r.Id[(r.Id.IndexOf(':') + 1)..])] = r.Xp;
-            return open.OrderByDescending(x => xp.TryGetValue(Catalog.Local(x.a.Ref.Target), out double v) ? v : -1)
-                       .ThenByDescending(x => x.i).Select(x => x.a.Ref).ToList();
+            {
+                if (r.Skill != skill.Name && r.Skill != Catalog.Local(skill.Id)) continue;
+                double v = r.Xp;
+                if (funding == Funding.None && r.In.Count > 0) v = double.NaN;
+                if (self != null)
+                {
+                    // XP per hour of your own time, gathering the ingredients counted in.
+                    double ih = self.InputHours(r);
+                    v = double.IsInfinity(ih) ? double.NaN : r.Xp / (1 + ih);
+                }
+                xp[Catalog.Local(r.Id[(r.Id.IndexOf(':') + 1)..])] = v;
+            }
+            if (funding != Funding.Bank)
+                // Only actions the plan knows and that fit the funding choice (no used-up toolbelt items either).
+                open = open.Where(x => xp.TryGetValue(Catalog.Local(x.a.Ref.Target), out double v) && !double.IsNaN(v)
+                                       && !Toolbelt.UsesConsumable(game, x.a.Ref)).ToList();
+            double Xp((ActionChoice a, int i) x) => xp.TryGetValue(Catalog.Local(x.a.Ref.Target), out double v) ? v : double.NaN;
+            return open.OrderByDescending(x => double.IsNaN(Xp(x)) ? -1 : Xp(x))
+                       .ThenByDescending(x => x.i).Select(x => (x.a.Ref, Xp(x))).ToList();
         }
-        return open.OrderByDescending(x => x.i).Select(x => x.a.Ref).ToList();
+        return funding == Funding.Bank ? open.OrderByDescending(x => x.i).Select(x => (x.a.Ref, double.NaN)).ToList() : new();
+    }
+
+    // A self-funded planner is costly to build (it prices every item); one per half minute is plenty.
+    static Planner? s_selfPlanner;
+    static DateTime s_selfPlannerAt;
+    static object? s_selfPlannerFor;
+
+    public static Planner SelfPlanner(Game game, PlanData data)
+    {
+        if (s_selfPlanner == null || s_selfPlannerFor != game || DateTime.UtcNow - s_selfPlannerAt > TimeSpan.FromSeconds(30))
+        {
+            s_selfPlanner = new Planner(data, game, selfFunded: true);
+            s_selfPlannerAt = DateTime.UtcNow;
+            s_selfPlannerFor = game;
+        }
+        return s_selfPlanner;
+    }
+
+    /// <summary>The planner's rate for an action (null when the plan doesn't know it).</summary>
+    public static PlanData.Rate? RateFor(Game game, PlanData data, ActionRef a)
+    {
+        SkillChoice? skill = Catalog.Skills(game).FirstOrDefault(s => s.Id == a.Entity);
+        if (skill == null) return null;
+        string target = Catalog.Local(a.Target);
+        return data.Rates.FirstOrDefault(r => (r.Skill == skill.Name || r.Skill == Catalog.Local(skill.Id))
+                                              && Catalog.Local(r.Id[(r.Id.IndexOf(':') + 1)..]) == target);
     }
 
 
