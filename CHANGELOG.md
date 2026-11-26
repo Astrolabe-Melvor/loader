@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+- Logbook 0.3.3: farm harvests, ranching, the grain mill, opened items and shop buys no longer show up as rare drops. Only what your current action itself gives can be rare.
+- Loader 0.4.2: no changes; the release number moves with the mods.
+- Leaves out createdump.exe from the .NET runtime (unused; mod sites quarantine any .exe).
+
 ## 0.4.1
 - Course 0.12.1: a step whose goal was already met shows "already met" instead of a red "skipped". Agility best-path steps read "Train Agility (Jump 3: Simple Path)". The Add a step form says "Your character is doing" instead of "Right now", which read as the step's pick.
 - Hold 0.6.1: "1 rule", "1 stack" instead of "1 rules", "1 stacks".

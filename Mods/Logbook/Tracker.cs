@@ -107,6 +107,9 @@ public sealed class Tracker
     readonly Dictionary<string, Queue<(double T, double Xp)>> _recent = new();
     static readonly object s_lock = new();
     static readonly Dictionary<string, long> s_actions = new();
+    // "entity|item" for items an action (not farming, ranching, the mill, opening, shop...) put in the bank since the last look.
+    static readonly HashSet<string> s_fromAction = new();
+    HashSet<string> _fromAction = new();
     Snapshot? _snap;
     Game? _hooked;
     volatile bool _offline;
@@ -195,6 +198,7 @@ public sealed class Tracker
             line.Level = level;
             if (_snap.Xp.TryGetValue(id, out double before) && x > before) line.Xp += x - before;
         }
+        lock (s_lock) { _fromAction = new HashSet<string>(s_fromAction); s_fromAction.Clear(); }
         foreach (var (id, q) in cur.Items)
         {
             long d = q - (_snap.Items.TryGetValue(id, out long b) ? b : 0);
@@ -280,7 +284,9 @@ public sealed class Tracker
         Add(Session.Gained, id, qty);
         int times = Session.Times[id] = (Session.Times.TryGetValue(id, out int t) ? t : 0) + 1;
         long actions = CurrentEntity.Length > 0 && Session.Skills.TryGetValue(CurrentEntity, out SkillLine? l) ? l.Actions : 0;
-        bool rare = actions >= RareActions && (long)times * RareRatio <= actions;
+        // Only what the current action itself gave can be rare: a farm harvest, the mill, ranching, opening a chest
+        // or a shop purchase comes in bulk now and then, which would otherwise look like a rare drop.
+        bool rare = actions >= RareActions && (long)times * RareRatio <= actions && _fromAction.Contains(CurrentEntity + "|" + id);
         if (!rare && !first) return;
         string per = Session.NameOf(CurrentEntity) == "Combat" ? "kills" : "actions";
         Session.Drops.Add(new DropEvent
@@ -309,6 +315,17 @@ public sealed class Tracker
                 if (e.IsSubAction || sender is not ActionComponent c || _offline || c.Entity is CombatEntity) return;
                 lock (s_lock) s_actions[c.Entity.Id] = (s_actions.TryGetValue(c.Entity.Id, out long n) ? n : 0) + 1;
             });
+            // Which items each action puts in the bank (passive skills, opening and the shop use other inventories).
+            foreach (IInventoryWalletComponent c in game.Entities.GetAllObjects().SelectMany(e => e.Components.Values).OfType<IInventoryWalletComponent>())
+            {
+                if (c is not ActionComponent && c is not GamesByMalcs.Melvor2.Components.CombatLoot.CombatLootComponent) continue;
+                string ent = c.Entity.Id;
+                c.Inventory.ItemAdded += (_, e) =>
+                {
+                    if (e.Quantity <= 0 || _offline) return;
+                    lock (s_lock) s_fromAction.Add(ent + "|" + e.Item.Id);
+                };
+            }
             // Combat does not report "action performed"; count kills instead.
             CombatEntity? combat = game.Entities.GetAllObjects().OfType<CombatEntity>().FirstOrDefault();
             if (combat != null)

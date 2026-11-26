@@ -2,6 +2,9 @@ Extract the zips into the Melvor Idle 2 game folder (next to Melvor2.exe): the l
 
 Already using Melvor Mod Loader? Keep it and extract only the mod zips you want. Astrolabe mods now run on either loader. Update all Astrolabe mods together with this release.
 
+## 0.4.2 fixes
+- Logbook 0.3.3: farm harvests, ranching, the grain mill, opened items and shop buys no longer show up as rare drops.
+
 ## 0.4.1 fixes
 - Course 0.12.1: steps whose goal was already met show "already met" instead of a red "skipped"; clearer Agility best-path names.
 - Hold 0.6.1 and Logbook 0.3.2: small wording fixes ("1 rule"; "idle" instead of 0 XP per hour).
