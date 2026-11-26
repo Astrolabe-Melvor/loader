@@ -30,3 +30,4 @@ The loader's tag in the top-left says when the game updated and which mods may b
 If the game does not start, delete "override.cfg" and wait for an updated loader.
 
 Not affiliated with Games by Malcs or Jagex. Source: https://github.com/Astrolabe-Melvor/loader
+Nexus Mods: https://www.nexusmods.com/melvoridle2/mods/55

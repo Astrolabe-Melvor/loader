@@ -6,7 +6,7 @@ Tested on game version 0.11.7 (Steam, Windows).
 
 ## Download
 
-**[Latest release](https://github.com/Astrolabe-Melvor/loader/releases/latest)**, or the [Mods page on the Astrolabe wiki](https://astrolabe-melvor.github.io/#/mods), which has the same files with a short description of each.
+**[Latest release](https://github.com/Astrolabe-Melvor/loader/releases/latest)**, [Nexus Mods](https://www.nexusmods.com/melvoridle2/mods/55), or the [Mods page on the Astrolabe wiki](https://astrolabe-melvor.github.io/#/mods). All three have the same files.
 
 1. Close the game.
 2. Open the game folder: Steam > right-click Melvor Idle 2 > Manage > Browse local files.
