@@ -49,13 +49,15 @@ sealed class PlanData
         // Your own rates from Astrolabe Tools change as you play: look again every 5 minutes. The wiki copy is
         // refreshed once a day.
         bool fromTools = Source.StartsWith("your");
-        bool due = s_data == null || DateTime.UtcNow - s_loadedAt > TimeSpan.FromMinutes(fromTools ? 5 : 30);
+        // Not loaded yet: try again a minute after a failed attempt, not on every call.
+        bool due = DateTime.UtcNow - s_loadedAt > (s_data == null ? TimeSpan.FromMinutes(1) : TimeSpan.FromMinutes(fromTools ? 5 : 30));
         if (!due) return s_data;
         s_loadedAt = DateTime.UtcNow;
         bool wikiStale = !File.Exists(file) || DateTime.UtcNow - File.GetLastWriteTimeUtc(file) > TimeSpan.FromDays(1);
         s_loading = Task.Run(async () =>
         {
-            using var http = new HttpClient();
+            // Set before the first request: HttpClient refuses changes once it has sent one.
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             try
             {
                 State = "asking Astrolabe Tools";
@@ -75,7 +77,6 @@ sealed class PlanData
             try
             {
                 State = "downloading";
-                http.Timeout = TimeSpan.FromSeconds(30);
                 string json = await http.GetStringAsync(Url);
                 PlanData? fresh = TryParse(json, log);
                 if (fresh != null) { File.WriteAllText(file, json); s_data = fresh; Source = "base game rates"; }

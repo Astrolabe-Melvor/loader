@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3
+- Course 0.12.2: the planner data (used by Most GP, Fastest XP and Plan an item) never downloaded unless Astrolabe Tools was running: the download failed with "This instance has already started one or more requests". Fixed. Most GP and Fastest XP steps also load the planner data themselves. Before, a queue that started without the Course window being opened that session waited forever on "planner data not loaded". The waiting message now says why (downloading, or the download error). Steps above a "Run from here" now read "not run" or "stopped early" (if it was running) instead of "done", aren't counted as done, and stay when you click Remove finished.
+- Loader 0.4.3: no changes; the release number moves with the mods.
+
 ## 0.4.2
 - Logbook 0.3.3: farm harvests, ranching, the grain mill, opened items and shop buys no longer show up as rare drops. Only what your current action itself gives can be rare.
 - Loader 0.4.2: no changes; the release number moves with the mods.

@@ -2,6 +2,9 @@ Extract the zips into the Melvor Idle 2 game folder (next to Melvor2.exe): the l
 
 Already using Melvor Mod Loader? Keep it and extract only the mod zips you want. Astrolabe mods now run on either loader. Update all Astrolabe mods together with this release.
 
+## 0.4.3 fixes
+- Course 0.12.2: the planner data now downloads without Astrolabe Tools running. Before, Most GP, Fastest XP and Plan an item waited on "planner data not loaded" for most players. Steps above a "Run from here" no longer show as "done".
+
 ## 0.4.2 fixes
 - Logbook 0.3.3: farm harvests, ranching, the grain mill, opened items and shop buys no longer show up as rare drops.
 

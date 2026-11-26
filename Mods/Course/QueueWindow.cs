@@ -246,7 +246,7 @@ sealed class QueueWindow
             WithTip(Kit.Btn("Up", () => MoveRows(-1)), "Move the ticked steps (or the selected one) up one place"),
             WithTip(Kit.Btn("Down", () => MoveRows(1)), "Move the ticked steps (or the selected one) down one place"),
             WithTip(Kit.Btn("Remove", RemoveRows), "Remove the ticked steps (or the selected one)"),
-            WithTip(Kit.Btn("Run from here", () => WithStep(i => { _tabPinned = false; _queue.Start(i); })), "Start the queue at the selected step; steps above it count as done"),
+            WithTip(Kit.Btn("Run from here", () => WithStep(i => { _tabPinned = false; _queue.Start(i); })), "Start the queue at the selected step; steps above it are passed over (not run, not marked done)"),
             _undo = Kit.Btn("Undo", () => _queue.Undo()),
             Kit.Spacer(),
             _stepHint = Kit.Label("", null, 12, "Dim"),
@@ -1305,7 +1305,7 @@ sealed class QueueWindow
     string StateText(Game? game, Step s, bool current)
     {
         string progress = _queue.Progress(game, s);
-        string state = s.State.Length > 0 ? s.State : s.Done ? "done" : current ? "starting" : "";
+        string state = s.PassedOver ? (s.PassedAfterStart ? "stopped early (queue started below)" : "not run (queue started below)") : s.State.Length > 0 ? s.State : s.Done ? "done" : current ? "starting" : "";
         return state.Length == 0 ? progress : progress.Length == 0 ? state : $"{state}  {progress}";
     }
 
@@ -1315,7 +1315,7 @@ sealed class QueueWindow
     void UpdateStatus()
     {
         var st = _queue.State;
-        int done = st.Steps.Count(x => x.Done);
+        int done = st.Steps.Count(x => x.Done && !x.PassedOver);
         _status.Text = st.Running ? $"{done}/{st.Steps.Count} done. {_queue.Status}"
             : st.Steps.Count == 0 ? "Add steps, then Start." : _queue.Status;
         _idleNote.Text = st.Idle == null ? "Idle action: none (the game keeps doing whatever it was doing)" : $"Idle action: {st.Idle.Label}";

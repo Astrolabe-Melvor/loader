@@ -127,7 +127,7 @@ sealed class QueueHud
         _panel.Visible = showSteps || _notice.Visible;
         if (!_panel.Visible) return;
 
-        int done = st.Steps.Count(x => x.Done);
+        int done = st.Steps.Count(x => x.Done && !x.PassedOver);
         _count.Text = showSteps ? $"{done}/{st.Steps.Count} done" : "";
         _fold.Text = st.HudMin ? "+" : "–";
         _fold.TooltipText = st.HudMin ? "Show the steps" : "Fold to one line";

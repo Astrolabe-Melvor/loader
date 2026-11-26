@@ -49,6 +49,10 @@ public sealed class Step
     // Progress, saved so a game restart picks up where it was.
     public bool Begun { get; set; }
     public bool Done { get; set; }
+    /// <summary>Set by "Run from here": the queue went past it without running it. Still counts as behind the queue.</summary>
+    public bool PassedOver { get; set; }
+    /// <summary>It was running (or had run) when "Run from here" passed over it: stopped early, not "not run".</summary>
+    public bool PassedAfterStart { get; set; }
     public int StartCount { get; set; }
     public long StartTimes { get; set; }
     public DateTime StartedUtc { get; set; }
@@ -107,7 +111,7 @@ public sealed class Step
 
     public void Reset()
     {
-        Begun = Done = Waiting = Finished = false;
+        Begun = Done = PassedOver = PassedAfterStart = Waiting = Finished = false;
         State = "";
         Restarts = Tries = 0;
         RetryAt = LastRestart = BestCheckAt = 0;
@@ -423,7 +427,7 @@ sealed class Queue
         if (State.Steps.Count == 0) State.Running = false;
     });
 
-    public void RemoveDone() => Change("remove finished steps", () => State.Steps.RemoveAll(x => x.Done));
+    public void RemoveDone() => Change("remove finished steps", () => State.Steps.RemoveAll(x => x.Done && !x.PassedOver));
 
     /// <summary>Moves the steps (kept in their order) so the first lands at <paramref name="to"/> in the list without them.
     /// Returns where they ended up.</summary>
@@ -471,14 +475,17 @@ sealed class Queue
     public void SetLoop(bool on) => Edit(() => State.Loop = on);
     public void SetIdle(ActionRef? a) => Edit(() => State.Idle = a);
 
-    /// <summary>Starts the queue; with <paramref name="from"/>, steps above it count as done.</summary>
+    /// <summary>Starts the queue; with <paramref name="from"/>, steps above it are passed over (finished ones stay done).</summary>
     public void Start(int from = -1) => Edit(() =>
     {
         if (State.Steps.Count == 0) return;
         for (int i = 0; i < State.Steps.Count; i++)
         {
-            State.Steps[i].Reset();
-            if (from >= 0 && i < from) State.Steps[i].Done = true;
+            Step s = State.Steps[i];
+            bool finished = s.Done && !s.PassedOver;                   // reached its goal (or was skipped) earlier: stays done
+            bool started = s.Begun && !s.Done || s.PassedAfterStart;   // running now, or stopped early by an earlier "Run from here"
+            s.Reset();
+            if (from >= 0 && i < from) { s.Done = true; s.PassedOver = !finished; s.PassedAfterStart = !finished && started; }
         }
         State.Running = true;
         Status = "Starting";
@@ -851,6 +858,9 @@ sealed class Queue
         if (s.IsBest && now >= s.BestCheckAt)
         {
             s.BestCheckAt = now + 10;
+            // Most GP and Fastest XP rank actions by the planner's rates. The Course window starts loading them, but
+            // a queue that runs from the start of a session may never have had the window open.
+            PlanData.Get(Folder, Log);
             ActionRef? top = Starter.BestFor(game, s.Action.Entity, s.Action.Target)
                 .FirstOrDefault(c => !s.FailedUntil.TryGetValue(c.Target, out double until) || now >= until);
             if (top != null && (s.Resolved == null || s.Resolved.Target != top.Target || s.Resolved.Area != top.Area))
@@ -863,7 +873,7 @@ sealed class Queue
             if (top == null && s.Resolved == null)
             {
                 s.Waiting = true;
-                s.State = s.IsGold ? (PlanData.Loaded == null ? "waiting: planner data not loaded" : "waiting: nothing makes GP with what you have") : "waiting: nothing to train yet";
+                s.State = s.IsGold ? (PlanData.Loaded == null ? "waiting for the planner data (" + PlanData.State + ")" : "waiting: nothing makes GP with what you have") : "waiting: nothing to train yet";
             }
             // Most GP: turn what it made into GP.
             if (s.IsGold && s.SellOutput && s.Resolved != null)
