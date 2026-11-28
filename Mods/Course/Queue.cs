@@ -36,6 +36,15 @@ public enum Funding
     Self,      // gather the ingredients first, then make; your existing stock is left alone
 }
 
+/// <summary>Thieving and Agility: what a queue step does when the bank runs out of the healing food it may use.</summary>
+public enum FoodOut
+{
+    KeepGoing,   // carry on; the game auto-eats the selected bonus food
+    NextStep,    // stop the step and move on
+    MakeMore,    // make more healing food in steps put before this one, then come back
+    Idle,        // stop and do the idle action until there is healing food again, then come back
+}
+
 public sealed class Step
 {
     public ActionRef Action { get; set; } = new();
@@ -98,6 +107,13 @@ public sealed class Step
     public Dictionary<string, int> Reserve { get; set; } = new();
     /// <summary>Put in by a self-funded step to gather its ingredients; removed once done, at the next round.</summary>
     public bool Gather { get; set; }
+    /// <summary>Smithing and Beastcrafting: use the recipe's other mode (Sacrificial Anvil, Astral Offerings) where
+    /// unlocked. Never for steps that count items. Most GP uses the anvil without asking.</summary>
+    public bool UseRewardMode { get; set; }
+    [JsonIgnore] public double FoodWindowStart { get; set; }
+    [JsonIgnore] public int FoodRuns { get; set; }
+    /// <summary>Stopped for want of healing food (<see cref="FoodOut.Idle"/>): starts again once there is some.</summary>
+    [JsonIgnore] public bool FoodWait { get; set; }
     [JsonIgnore] public double GatherWindowStart { get; set; }
     [JsonIgnore] public int Gathers { get; set; }
     /// <summary>The action to run: the step's own, or for "train a skill" the one picked for now.</summary>
@@ -122,7 +138,7 @@ public sealed class Step
 
     public Step Copy() => new()
     {
-        Action = Action, Goal = Goal, Amount = Amount, Skill = Skill, SkillName = SkillName, Item = Item, ItemName = ItemName, Gear = Gear, Weapon = Weapon, Stance = Stance, Belt = Belt, SellOutput = SellOutput, Funding = Funding,
+        Action = Action, Goal = Goal, Amount = Amount, Skill = Skill, SkillName = SkillName, Item = Item, ItemName = ItemName, Gear = Gear, Weapon = Weapon, Stance = Stance, Belt = Belt, SellOutput = SellOutput, Funding = Funding, UseRewardMode = UseRewardMode,
     };
 
     public void Reset()
@@ -184,6 +200,28 @@ public sealed class QueueState
     public int FinesseFloor { get; set; } = 30;
     /// <summary>Toolbelt sets per skill, made in the Toolbelts tab.</summary>
     public List<BeltSet> Belts { get; set; } = new();
+    /// <summary>Food (item ids) never used for thieving and agility: not as bonus food, not to heal.</summary>
+    public HashSet<string> FoodSkip { get; set; } = new();
+    /// <summary>Other skills' bonus food (combat) it may heal with; kept for its own skill otherwise.</summary>
+    public HashSet<string> FoodAllow { get; set; } = new();
+    /// <summary>Heal with the biggest heal first instead of the cheapest per HP.</summary>
+    public bool HealBiggestFirst { get; set; }
+    [JsonIgnore] internal Finesse.FoodRules FoodRules => new(FoodSkip, FoodAllow, HealBiggestFirst);
+    /// <summary>What a thieving or agility step does when the healing food it may use runs out.</summary>
+    public FoodOut FoodOut { get; set; }
+    /// <summary>For <see cref="FoodOut.MakeMore"/>: the food to make (item id), "" = the cheapest per HP you can make.</summary>
+    public string FoodMake { get; set; } = "";
+    public int FoodMakeAmount { get; set; } = 500;
+    /// <summary>For <see cref="FoodOut.MakeMore"/>: gather every ingredient instead of using what's in the bank.</summary>
+    public bool FoodSelfFund { get; set; }
+    /// <summary>History keeps this many lines (in the tab and on disk); older ones are dropped.</summary>
+    public int HistoryLimit { get; set; } = 2000;
+    /// <summary>Kinds of history line to highlight (see <see cref="Queue.HistoryKinds"/>).</summary>
+    public HashSet<string> HistoryFlags { get; set; } = new() { "skipped", "paused", "failed" };
+    /// <summary>Highlighted lines you've looked at ("time|text"), so they stop counting.</summary>
+    public HashSet<string> HistorySeen { get; set; } = new();
+    /// <summary>"entity|recipe" to the reward mode it had before a step changed it ("" = none), so it can be put back.</summary>
+    public Dictionary<string, string> RewardRestore { get; set; } = new();
 }
 
 public sealed record HistoryEntry(DateTime Time, string Text);
@@ -240,21 +278,89 @@ sealed class Queue
         _log(text);
         var e = new HistoryEntry(_offline ? _virtualUtc.ToLocalTime() : DateTime.Now, text);
         History.Add(e);
-        if (History.Count > 500) History.RemoveRange(0, History.Count - 500);
+        int limit = HistoryLimit;
+        if (History.Count > limit) History.RemoveRange(0, History.Count - limit);
         if (!HasCharacter) return;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(HistoryFile)!);
             File.AppendAllText(HistoryFile, $"{e.Time:yyyy-MM-dd HH:mm:ss}\t{text}{Environment.NewLine}");
+            // The file only grows by appending: now and then cut it back to what the tab keeps.
+            if (++_historyLines > limit + 500) WriteHistory();
         }
         catch { }
     }
 
-    public void ClearHistory()
+    int HistoryLimit => Math.Clamp(State.HistoryLimit, 100, 100_000);
+
+    /// <summary>What History can highlight, how it spots each one, and whether it's on unless you change it.</summary>
+    public static readonly (string Id, string Name, bool On)[] HistoryKinds =
     {
-        History.Clear();
-        try { File.Delete(HistoryFile); } catch { }
+        ("skipped", "Skipped steps", true),
+        ("paused", "The queue pausing (a full bank, say)", true),
+        ("failed", "Something that didn't work (can't, couldn't, gear not changed, no way to make)", true),
+        ("ranout", "Running out of food or a refill (Course makes more and carries on)", false),
+        ("finished", "The queue finishing", false),
+    };
+
+    /// <summary>Which kind of line this is, by its wording; null for ordinary lines.</summary>
+    public static string? KindOf(string text) =>
+        text.StartsWith("Skipped") ? "skipped"
+        : text.StartsWith("Paused") || text.StartsWith("Queue paused") ? "paused"
+        : text.Contains("can't") || text.Contains("couldn't") || text.Contains("Could not") || text.Contains("not changed") || text.Contains("no way to make") ? "failed"
+        : text.Contains(": out of ") ? "ranout"
+        : text.StartsWith("Queue finished") || text.Contains("the queue finished") ? "finished"
+        : null;
+
+    static string SeenKey(HistoryEntry e) => $"{e.Time:yyyy-MM-dd HH:mm:ss}|{e.Text}";
+    public bool Flagged(HistoryEntry e) => KindOf(e.Text) is string k && State.HistoryFlags.Contains(k);
+    public bool Seen(HistoryEntry e) => State.HistorySeen.Contains(SeenKey(e));
+    public bool NeedsLook(HistoryEntry e) => Flagged(e) && !Seen(e);
+
+    public void MarkSeen(IEnumerable<HistoryEntry> lines)
+    {
+        var keys = lines.Where(Flagged).Select(SeenKey).ToList();
+        if (keys.Count > 0) Edit(() => State.HistorySeen.UnionWith(keys));
+    }
+
+    public void SetHistoryFlag(string kind, bool on) => Edit(() => { if (on) State.HistoryFlags.Add(kind); else State.HistoryFlags.Remove(kind); });
+
+    // Seen marks for lines no longer in the history are dropped, so the list stays small.
+    void PruneSeen()
+    {
+        if (State.HistorySeen.Count == 0) return;
+        var have = History.Select(SeenKey).ToHashSet();
+        State.HistorySeen.RemoveWhere(k => !have.Contains(k));
+    }
+    int _historyLines;   // lines in the history file, roughly (to know when to cut it back)
+
+    void WriteHistory()
+    {
+        if (!HasCharacter) return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(HistoryFile)!);
+            File.WriteAllLines(HistoryFile, History.Select(h => $"{h.Time:yyyy-MM-dd HH:mm:ss}\t{h.Text}"));
+            _historyLines = History.Count;
+            PruneSeen();
+        }
+        catch { }
+    }
+
+    /// <summary>Clears history older than <paramref name="before"/>, or all of it.</summary>
+    public void ClearHistory(DateTime? before = null)
+    {
+        if (before is DateTime b) History.RemoveAll(h => h.Time < b); else History.Clear();
+        if (History.Count == 0) { try { File.Delete(HistoryFile); } catch { } _historyLines = 0; State.HistorySeen.Clear(); }
+        else WriteHistory();
         Notify();
+    }
+
+    public void SetHistoryLimit(int lines)
+    {
+        Edit(() => State.HistoryLimit = lines);
+        if (History.Count > HistoryLimit) { History.RemoveRange(0, History.Count - HistoryLimit); WriteHistory(); }
+        else Notify();
     }
 
     void LoadHistory()
@@ -262,12 +368,17 @@ sealed class Queue
         History.Clear();
         try
         {
+            _historyLines = 0;
             if (!File.Exists(HistoryFile)) return;
-            foreach (string line in File.ReadLines(HistoryFile).TakeLast(500))
+            var lines = File.ReadAllLines(HistoryFile);
+            _historyLines = lines.Length;
+            foreach (string line in lines.TakeLast(HistoryLimit))
             {
                 int tab = line.IndexOf('\t');
                 if (tab > 0 && DateTime.TryParse(line[..tab], out DateTime t)) History.Add(new HistoryEntry(t, line[(tab + 1)..]));
             }
+            if (lines.Length > HistoryLimit + 500) WriteHistory();   // an old, long file: cut it back once
+            PruneSeen();
         }
         catch { }
     }
@@ -336,19 +447,91 @@ sealed class Queue
             ? Directory.EnumerateFiles(SavedFolder, "*.json").Select(Path.GetFileNameWithoutExtension).OfType<string>().OrderBy(n => n)
             : Enumerable.Empty<string>();
 
+    public bool SavedExists(string name) => Safe(name).Length > 0 && File.Exists(SavedFile(name));
+    string SavedFile(string name) => Path.Combine(SavedFolder, Safe(name) + ".json");
+
     public void SaveAs(string name)
     {
         name = Safe(name);
         if (name.Length == 0) return;
+        Write(SavedFile(name), new QueueState { Name = name, Loop = State.Loop, Idle = State.Idle, Steps = State.Steps.Select(s => s.Copy()).ToList() });
+        _savedSig.Remove(name);
         Edit(() => State.Name = name);
-        Write(Path.Combine(SavedFolder, name + ".json"),
-            new QueueState { Name = name, Loop = State.Loop, Idle = State.Idle, Steps = State.Steps.Select(s => s.Copy()).ToList() });
+    }
+
+    /// <summary>Saves steps under a name without touching the current queue (a pasted share code).</summary>
+    public void SaveStepsAs(string name, IEnumerable<Step> steps)
+    {
+        name = Safe(name);
+        if (name.Length == 0) return;
+        Write(SavedFile(name), new QueueState { Name = name, Steps = steps.Select(s => s.Copy()).ToList() });
+        _savedSig.Remove(name);
+        Notify();
+    }
+
+    /// <summary>A saved queue as it is on disk (null if it can't be read).</summary>
+    public QueueState? ReadSaved(string name) => Read(SavedFile(name));
+
+    public DateTime SavedTime(string name)
+    {
+        try { return File.GetLastWriteTime(SavedFile(name)); } catch { return default; }
+    }
+
+    public void RenameSaved(string from, string to)
+    {
+        to = Safe(to);
+        if (to.Length == 0 || to == from || SavedExists(to)) return;
+        QueueState? q = ReadSaved(from);
+        if (q == null) return;
+        q.Name = to;
+        Write(SavedFile(to), q);
+        try { File.Delete(SavedFile(from)); } catch { }
+        _savedSig.Remove(from);
+        if (State.Name == from) Edit(() => State.Name = to); else Notify();
+    }
+
+    /// <summary>Adds a saved queue's steps to the end of this one.</summary>
+    public void AddSaved(string name)
+    {
+        QueueState? q = ReadSaved(name);
+        if (q == null || q.Steps.Count == 0) return;
+        Change($"add \"{q.Name}\"", () => State.Steps.AddRange(q.Steps.Select(s => s.Copy())));
+    }
+
+    /// <summary>Replaces the steps with these (a pasted share code); the queue is then unsaved.</summary>
+    public void ReplaceSteps(IEnumerable<Step> steps)
+    {
+        var list = steps.Select(s => s.Copy()).ToList();
+        Change("replace the queue", () => { State.Steps = list; State.Name = ""; State.Running = false; });
+    }
+
+    // What a queue looks like for "changed since you saved it": steps (without their progress), loop and idle action.
+    readonly Dictionary<string, (DateTime Time, string Sig)> _savedSig = new();
+    static string Signature(QueueState q) =>
+        JsonSerializer.Serialize(new { q.Loop, q.Idle, Steps = q.Steps.Select(s => s.Copy()).ToList() }, s_json);
+
+    /// <summary>The current queue differs from the saved one it was loaded from or saved as (or was never saved).</summary>
+    public bool ChangedSinceSaved
+    {
+        get
+        {
+            if (State.Name.Length == 0) return State.Steps.Count > 0;
+            DateTime t = SavedTime(State.Name);
+            if (!_savedSig.TryGetValue(State.Name, out var c) || c.Time != t)
+            {
+                QueueState? q = ReadSaved(State.Name);
+                if (q == null) return true;
+                _savedSig[State.Name] = c = (t, Signature(q));
+            }
+            return c.Sig != Signature(State);
+        }
     }
 
     public void LoadSaved(string name)
     {
-        QueueState? q = Read(Path.Combine(SavedFolder, Safe(name) + ".json"));
+        QueueState? q = Read(SavedFile(name));
         if (q == null) return;
+        Snapshot($"load \"{q.Name}\"");
         Edit(() =>
         {
             QueueState o = State; // options and gear sets belong to the character, not the saved queue
@@ -357,6 +540,7 @@ sealed class Queue
                 Name = q.Name, Loop = q.Loop, Idle = q.Idle, Steps = q.Steps.Select(s => s.Copy()).ToList(),
                 Alerts = o.Alerts, FoodGuard = o.FoodGuard, BankGuard = o.BankGuard, Hud = o.Hud, AutoGear = o.AutoGear, SkillGear = o.SkillGear, WeaponRestore = o.WeaponRestore, OffhandRestore = o.OffhandRestore, SlotRestore = o.SlotRestore, SlayerGauntlet = o.SlayerGauntlet, Belts = o.Belts,
                 SlayerSkip = o.SlayerSkip, SlayerExtend = o.SlayerExtend, SlayerReserve = o.SlayerReserve, SlayerRerollLocked = o.SlayerRerollLocked, SlayerAlways = o.SlayerAlways, FinesseGear = o.FinesseGear, FinesseFood = o.FinesseFood, FinesseFloor = o.FinesseFloor, HudX = o.HudX, HudY = o.HudY, HudMin = o.HudMin,
+                FoodSkip = o.FoodSkip, FoodAllow = o.FoodAllow, HealBiggestFirst = o.HealBiggestFirst, FoodOut = o.FoodOut, FoodMake = o.FoodMake, FoodMakeAmount = o.FoodMakeAmount, FoodSelfFund = o.FoodSelfFund, HistoryLimit = o.HistoryLimit, HistoryFlags = o.HistoryFlags, HistorySeen = o.HistorySeen, RewardRestore = o.RewardRestore,
             };
             Status = $"Loaded \"{q.Name}\"";
         });
@@ -364,7 +548,8 @@ sealed class Queue
 
     public void DeleteSaved(string name)
     {
-        try { File.Delete(Path.Combine(SavedFolder, Safe(name) + ".json")); } catch { }
+        try { File.Delete(SavedFile(name)); } catch { }
+        _savedSig.Remove(name);
         if (State.Name == name) Edit(() => State.Name = ""); else Notify();
     }
 
@@ -375,7 +560,14 @@ sealed class Queue
         Notify();
     }
 
-    readonly List<(string Steps, string What)> _undo = new();
+    readonly List<(string Steps, string Name, bool Loop, ActionRef? Idle, string What)> _undo = new();
+
+    /// <summary>What Undo puts back: the steps, and the queue's name, loop and idle action (loading changes those).</summary>
+    void Snapshot(string what)
+    {
+        _undo.Add((JsonSerializer.Serialize(State.Steps), State.Name, State.Loop, State.Idle, what));
+        if (_undo.Count > 30) _undo.RemoveAt(0);
+    }
 
     /// <summary>What Undo would put back, or "" when there is nothing to undo.</summary>
     public string UndoWhat => _undo.Count == 0 ? "" : _undo[^1].What;
@@ -383,15 +575,14 @@ sealed class Queue
     /// <summary>A change to the step list that Undo can take back.</summary>
     void Change(string what, Action change)
     {
-        _undo.Add((JsonSerializer.Serialize(State.Steps), what));
-        if (_undo.Count > 30) _undo.RemoveAt(0);
+        Snapshot(what);
         Edit(() => { change(); Settle(); });
     }
 
     public void Undo()
     {
         if (_undo.Count == 0) return;
-        var (json, what) = _undo[^1];
+        var (json, name, loop, idle, what) = _undo[^1];
         _undo.RemoveAt(_undo.Count - 1);
         List<Step>? steps = null;
         try { steps = JsonSerializer.Deserialize<List<Step>>(json); } catch { }
@@ -399,6 +590,9 @@ sealed class Queue
         Edit(() =>
         {
             State.Steps = steps;
+            State.Name = name;
+            State.Loop = loop;
+            State.Idle = idle;
             if (steps.Count == 0) State.Running = false;
             foreach (Step st in steps.Where(x => x.Begun && !x.Done)) { st.Waiting = true; st.RetryAt = 0; }
             Settle();
@@ -423,6 +617,11 @@ sealed class Queue
 
     public void Add(Step s) => Change("add a step", () => State.Steps.Add(s));
     public void AddRange(IEnumerable<Step> steps) => Change("add steps", () => State.Steps.AddRange(steps));
+    public void Insert(int at, IEnumerable<Step> steps)
+    {
+        var list = steps.ToList();
+        Change(list.Count == 1 ? "add a step" : $"add {list.Count} steps", () => State.Steps.InsertRange(Math.Clamp(at, 0, State.Steps.Count), list));
+    }
 
     public void Remove(int i) => Change("remove a step", () =>
     {
@@ -444,6 +643,21 @@ sealed class Queue
         foreach (int i in rows.Where(i => i >= 0 && i < State.Steps.Count).OrderByDescending(i => i)) State.Steps.RemoveAt(i);
         if (State.Steps.Count == 0) State.Running = false;
     });
+
+    /// <summary>Copies of the steps (their settings, not their progress) right after the last of them. Returns the copies' places.</summary>
+    public List<int> Duplicate(IReadOnlyCollection<int> rows)
+    {
+        var picked = rows.Where(i => i >= 0 && i < State.Steps.Count).Distinct().OrderBy(i => i).ToList();
+        var result = new List<int>();
+        if (picked.Count == 0) return result;
+        Change(picked.Count == 1 ? "duplicate a step" : $"duplicate {picked.Count} steps", () =>
+        {
+            int at = picked[^1] + 1;
+            State.Steps.InsertRange(at, picked.Select(i => State.Steps[i].Copy()));
+            result.AddRange(Enumerable.Range(at, picked.Count));
+        });
+        return result;
+    }
 
     public void RemoveDone() => Change("remove finished steps", () => State.Steps.RemoveAll(x => x.Done && !x.PassedOver));
 
@@ -487,6 +701,8 @@ sealed class Queue
     public void Replace(int i, Step s) => Change("edit a step", () => { if (i >= 0 && i < State.Steps.Count) State.Steps[i] = s; });
 
     public void SetOption(Action<QueueState> set) => Edit(() => set(State));
+    /// <summary>The food choices changed: pick the bonus food again on the next check.</summary>
+    public void FoodChanged() => _buffAt = 0;
 
 
     public void Clear() => Change("remove all steps", () => { State.Steps.Clear(); State.Running = false; State.Name = ""; Status = "Not running"; });
@@ -631,9 +847,10 @@ sealed class Queue
     // ---- running ----
 
     bool _bankFullNoted;
-    double _nextSlayer, _nextFeed, _buffAt;
+    double _nextSlayer, _nextFeed, _buffAt, _nextOfflineFeed;
     string _buffFor = "", _foodNote = "";
     GamesByMalcs.Melvor2.Data.Items.Item? _buff;
+    readonly Dictionary<string, int> _offlineAte = new();
 
     void Feed(Game game, double now)
     {
@@ -646,9 +863,16 @@ sealed class Queue
             _buffFor = key;
             _buffAt = now + 180;
             if (game.Entities.TryGetObjectById(cur.Entity, out GamesByMalcs.Melvor2.Entities.GameEntity? e) && e is GamesByMalcs.Melvor2.Components.CombatFood.IFoodEntity fe)
-                _buff = Finesse.BuffFood(game, fe, cur);
+                _buff = Finesse.BuffFood(game, fe, cur, State.FoodRules);
         }
-        string did = Finesse.Feed(game, cur, _buff, State.FinesseFloor);
+        string did = Finesse.Feed(game, cur, _buff, State.FinesseFloor, State.FoodRules);
+        // During time away every heal would be its own history line; count them and say it once when the game is back.
+        if (_offline && System.Text.RegularExpressions.Regex.Match(did, @"^ate (\d+) (.+?) \(") is { Success: true } m)
+        {
+            _offlineAte.TryGetValue(m.Groups[2].Value, out int n);
+            _offlineAte[m.Groups[2].Value] = n + int.Parse(m.Groups[1].Value);
+            return;
+        }
         if (did.Length > 0 && did != _foodNote) Note($"{cur.Label}: {did}");
         _foodNote = did.StartsWith("ate") ? "" : did;   // repeat "ate" notes, not "no healing food" ones
     }
@@ -677,17 +901,31 @@ sealed class Queue
             _lastOnlineUtc = DateTime.UtcNow;
             return;
         }
-        if (!State.Running || !HasCharacter || game.CharacterName != _character || _game != game) return;
+        bool feeding = State.FinesseFood;
+        if (!(State.Running || feeding) || !HasCharacter || game.CharacterName != _character || _game != game) return;
         if (!_wasOffline)
         {
             _wasOffline = _hadOffline = true;
-            _simSeconds = _nextOfflineRun = 0;
+            _simSeconds = _nextOfflineRun = _nextOfflineFeed = 0;
             _offlineSteps = State.Steps.Count(x => x.Done);
             // Time away starts when the game last ran: the last frame, or for a game just loaded, its save time.
             _virtualBase = _lastOnlineUtc != default ? _lastOnlineUtc : game.LoadedSaveTimestamp.ToUniversalTime();
         }
         _simSeconds += GamesByMalcs.Melvor2.Core.Constants.TickInterval / 1000.0;
-        if (_simSeconds < _nextOfflineRun) return;
+        // Thieving and agility food during time away too: without this the game auto-eats the sushi all night.
+        if (feeding && _simSeconds >= _nextOfflineFeed)
+        {
+            _nextOfflineFeed = _simSeconds + 1;
+            lock (_gate)
+            {
+                _offline = true;
+                _virtualUtc = _virtualBase.AddSeconds(_simSeconds);
+                try { Feed(game, _lastNow + _simSeconds); }
+                catch (Exception e) { _log("Food while the game was closed: " + e.Message); _nextOfflineFeed = double.MaxValue; }
+                finally { _offline = false; }
+            }
+        }
+        if (!State.Running || _simSeconds < _nextOfflineRun) return;
         _nextOfflineRun = _simSeconds + 2;
         lock (_gate)
         {
@@ -710,6 +948,11 @@ sealed class Queue
             foreach (Step x in State.Steps) { x.RetryAt = x.BestCheckAt = x.BeltCheckAt = x.LastRestart = 0; x.FailedUntil.Clear(); }
             int moved = State.Steps.Count(x => x.Done) - _offlineSteps;
             if (moved > 0) Note($"While the game was closed, the queue finished {moved} step{(moved == 1 ? "" : "s")}.");
+            if (_offlineAte.Count > 0)
+            {
+                Note("While the game was closed, healed with " + string.Join(", ", _offlineAte.Select(kv => $"{kv.Value:N0} {kv.Key}")) + " to keep the buff food for its bonus.");
+                _offlineAte.Clear();
+            }
             foreach (string a in _pendingAlerts)
             {
                 if (State.Alerts) Alert?.Invoke(a);
@@ -785,6 +1028,13 @@ sealed class Queue
         bool changed = false;
         foreach (Step s in current) changed |= Run(game, s, now);
         if (State.RemoveFinished && !State.Loop && State.Steps.RemoveAll(x => x.Finished) > 0) changed = true;
+        // Recipes a finished (or switched-away) step changed to the Sacrificial Anvil or Astral Offerings go back.
+        if (State.RewardRestore.Count > 0)
+        {
+            int had = State.RewardRestore.Count;
+            RewardModes.Restore(game, State, CurrentSteps().Where(x => !x.Done).Select(x => x.Effective));
+            changed |= State.RewardRestore.Count != had;
+        }
 
         // While the step waits for materials, the idle action uses the free time.
         List<Step> after = CurrentSteps().ToList();
@@ -880,7 +1130,7 @@ sealed class Queue
             // Most GP and Fastest XP rank actions by the planner's rates. The Course window starts loading them, but
             // a queue that runs from the start of a session may never have had the window open.
             PlanData.Get(Folder, Log);
-            ActionRef? top = Starter.BestFor(game, s.Action.Entity, s.Action.Target, s.Funding)
+            ActionRef? top = Starter.BestFor(game, s.Action.Entity, s.Action.Target, s.Funding, s.UseRewardMode)
                 .FirstOrDefault(c => !s.FailedUntil.TryGetValue(c.Target, out double until) || now >= until);
             if (top != null && (s.Resolved == null || s.Resolved.Target != top.Target || s.Resolved.Area != top.Area))
             {
@@ -911,6 +1161,17 @@ sealed class Queue
         if (!s.Begun || s.Waiting)
         {
             if (now < s.RetryAt) return switched;
+            // Waiting for healing food (the idle action runs meanwhile).
+            if (s.FoodWait)
+            {
+                if (Finesse.Handles(game, act.Entity) && Finesse.OutOfHealing(game, State.FoodRules))
+                {
+                    s.RetryAt = now + RetryWait;
+                    return switched;
+                }
+                s.FoodWait = false;
+                Note($"{Label(s)}: there's healing food again; back to it");
+            }
             // Combat loadout first, so the fight starts with the right gear. Only one combat step runs at a time.
             if (State.AutoGear && Gear.Wanted(game, State, s) is string gear)
             {
@@ -944,6 +1205,16 @@ sealed class Queue
                 string put = Belts.Apply(game, set);
                 if (put.Length > 0 && (s.Tries == 0 || put.Contains("put on") || put.Contains("topped"))) Note($"{Label(s)}: {set.Name}: {put}");
             }
+            // Smithing and Beastcrafting: the recipe's other mode on or off as the step wants (put back afterwards).
+            try
+            {
+                if (RewardModes.For(game, act, out _) != null)
+                {
+                    string rm = RewardModes.Set(game, State, act, WantsRewardMode(s));
+                    if (rm.Length > 0) Note($"{Label(s)}: {rm}");
+                }
+            }
+            catch (Exception e) { Log("Reward mode: " + e.Message); }
             string why = StartIt(act);
             if (why.Length > 0)
             {
@@ -961,7 +1232,7 @@ sealed class Queue
                     s.FailedUntil[act.Target] = now + 120;
                     s.Resolved = null;
                     s.BestCheckAt = 0;
-                    if (Starter.BestFor(game, s.Action.Entity, s.Action.Target, s.Funding).Any(c => !s.FailedUntil.TryGetValue(c.Target, out double u) || now >= u)) return true;
+                    if (Starter.BestFor(game, s.Action.Entity, s.Action.Target, s.Funding, s.UseRewardMode).Any(c => !s.FailedUntil.TryGetValue(c.Target, out double u) || now >= u)) return true;
                 }
                 // Cannot start (usually missing materials or a level). Wait and retry; give up after about 10 minutes,
                 // or after a minute when nothing else could use the time.
@@ -999,6 +1270,11 @@ sealed class Queue
             if (Refill(game, s, bset, index, now)) return true;
         }
 
+        // Thieving and Agility: out of the healing food it may use. What happens is up to Options.
+        if (State.FinesseFood && State.FoodOut != FoodOut.KeepGoing && Finesse.Handles(game, act.Entity)
+            && Finesse.OutOfHealing(game, State.FoodRules))
+            return OutOfHealingFood(game, s, act, index, now);
+
         // Combat: stop before running out of food leaves the character fighting with nothing to eat.
         if (State.FoodGuard && OutOfFood(game, act))
         {
@@ -1020,6 +1296,82 @@ sealed class Queue
     }
 
     public BeltSet? SetOf(Step s) => s.Belt.Length == 0 ? null : State.Belts.FirstOrDefault(b => b.Id == s.Belt);
+
+    /// <summary>
+    /// Whether a step runs its recipe in the skill's other mode: Most GP always with the Sacrificial Anvil (it pays
+    /// in GP straight away, a little more than selling); steps that count items never (the mode would destroy or
+    /// replace them); anything else when the step asks for it.
+    /// </summary>
+    static bool WantsRewardMode(Step s) =>
+        s.IsGold || (s.Goal is not (Goal.BankCount or Goal.MoreItems) && s.UseRewardMode);
+
+    /// <summary>The bank has none of the healing food a thieving or agility step may use: Options decide what next.</summary>
+    bool OutOfHealingFood(Game game, Step s, ActionRef act, int index, double now)
+    {
+        Starter.Component(game, act)?.TryStop(true);
+        switch (State.FoodOut)
+        {
+            case FoodOut.NextStep:
+                return Skip(s, $"{Label(s)}: stopped, out of healing food");
+            case FoodOut.Idle:
+                s.FoodWait = true;
+                s.Waiting = true;
+                s.RetryAt = now + RetryWait;
+                s.State = "waiting: out of healing food";
+                Note($"{Label(s)}: out of healing food; " + (State.Idle != null ? $"doing {State.Idle.Label}" : "waiting") + " until there's some, then back to this");
+                return true;
+            case FoodOut.MakeMore:
+                if (now - s.FoodWindowStart > 1800) { s.FoodWindowStart = now; s.FoodRuns = 0; }
+                if (++s.FoodRuns <= 3 && MakeFood(game, s, index)) return true;
+                return Skip(s, $"{Label(s)}: stopped, out of healing food and none it can make");
+        }
+        return false;
+    }
+
+    /// <summary>Healing food planned the way Options say: what to make, how many, and its steps.</summary>
+    internal sealed record FoodPlan(Item Food, int Amount, List<PlanLine> Lines, List<Step> Steps, double Hours);
+
+    /// <summary>
+    /// Plans the healing food from Options: the food picked there, or else the cheapest per HP you can make (food you
+    /// keep out is passed over). Ingredients in the bank are used first unless Options say to gather them all.
+    /// Null when nothing can be planned; <paramref name="why"/> says why for the first food tried.
+    /// </summary>
+    internal FoodPlan? PlanFood(Game game, out string why)
+    {
+        why = "";
+        PlanData? data = PlanData.Get(Folder, Log);
+        if (data == null) { why = "no rates to plan with"; return null; }
+        IEnumerable<Item> foods = State.FoodMake.Length > 0
+            ? new[] { Catalog.FindItem(game, State.FoodMake) }.OfType<Item>()
+            : Finesse.AllFoods(game).Where(f => f.Kind == Finesse.FoodKind.Plain && !State.FoodSkip.Contains(f.Item.Id))
+                .OrderBy(f => f.PerHp).ThenByDescending(f => f.Heal).Select(f => f.Item);
+        int amount = Math.Max(1, State.FoodMakeAmount);
+        var planner = new Planner(data, game, selfFunded: State.FoodSelfFund);
+        foreach (Item food in foods)
+        {
+            List<PlanLine> lines = planner.Plan(Catalog.Local(food.Id), amount, more: true);
+            PlanLine? bad = lines.FirstOrDefault(l => l.Problem.Length > 0);
+            if (bad != null) { if (why.Length == 0) why = $"{food.DisplayName}: {bad.Problem}"; continue; }
+            if (lines.Count == 0) continue;
+            planner.ResolveIds(lines);
+            List<Step> steps = planner.ToSteps(lines);
+            if (steps.Count == 0) continue;
+            return new FoodPlan(food, amount, lines, steps, lines.Where(l => !double.IsInfinity(l.Hours)).Sum(l => l.Hours));
+        }
+        return null;
+    }
+
+    /// <summary>Puts the planned healing food in steps before this one, which waits and carries on after them.</summary>
+    bool MakeFood(Game game, Step s, int index)
+    {
+        if (PlanFood(game, out _) is not FoodPlan p) return false;
+        Edit(() => State.Steps.InsertRange(index, p.Steps));
+        s.Waiting = true;
+        s.RetryAt = 0;
+        s.State = $"waiting: making {p.Amount:N0} {p.Food.DisplayName}";
+        Note($"{Label(s)}: out of healing food; making {p.Amount:N0} {p.Food.DisplayName} first ({p.Steps.Count} step{(p.Steps.Count == 1 ? "" : "s")}), then back to this");
+        return true;
+    }
 
     /// <summary>
     /// Refills a used-up consumable from the step's toolbelt set: straight from the bank when it has some, otherwise
@@ -1172,6 +1524,7 @@ sealed class Queue
         }
         State.Running = false;
         Status = "Finished";
+        RewardModes.Restore(game, State, Array.Empty<ActionRef>());
         if (State.AutoGear && CombatSetup.Restore(game, State) is { Length: > 0 } back) Note($"Queue finished: {back}");
         if (State.Idle != null) { { WearIdle(game); Starter.Start(game, State.Idle); } Status += $"; now {State.Idle.Label}"; }
         Raise("Queue finished" + (State.Idle != null ? $"; now {State.Idle.Label}" : ""));

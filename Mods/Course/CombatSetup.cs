@@ -105,7 +105,21 @@ static class CombatSetup
             parts.Add(group.Key.DisplayName.ToString() + ": " + string.Join(", ", vals.Select(v => $"{v.Item1} {v.Item2:0}{(v.Item2 == low && vals.Count > 1 ? " (weakest)" : "")}")));
         }
         string who = enemies.Count == 1 ? enemies[0].DisplayName.ToString() : $"{enemies.Count} dungeon monsters (average)";
-        return $"{who}, defence by stance, lower is easier to hit. {string.Join(". ", parts)}.";
+        return $"{who}: defence by stance, lower is easier to hit\n" + string.Join("\n", parts);
+    }
+
+    /// <summary>One short line: each style's weakest stance against these monsters ("Crush 92 (Melee)").</summary>
+    public static string WeakestText(Game game, List<Enemy> enemies)
+    {
+        if (enemies.Count == 0) return "";
+        var parts = new List<string>();
+        foreach (var group in AllStances(game).GroupBy(s => s.CombatStyle))
+        {
+            var low = group.Select(s => (Name: s.DisplayName.ToString(), Def: enemies.Average(e => e.Stats.GetCombatStatTotal(s.EvasionStat)))).OrderBy(v => v.Def).First();
+            parts.Add($"{low.Name} {low.Def:0} ({group.Key.DisplayName})");
+        }
+        string who = enemies.Count == 1 ? enemies[0].DisplayName.ToString() : $"{enemies.Count} dungeon monsters, averaged";
+        return $"{who}. Weakest defence: {string.Join(", ", parts)}. Lower is easier to hit; hover for every stance.";
     }
 
     // ---- weapons ----

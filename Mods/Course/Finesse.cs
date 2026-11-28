@@ -182,8 +182,9 @@ static class Finesse
         if (Agility(game) is { } ag && ag.Courses.FirstOrDefault(kv => kv.Key.Id == r.Target).Value is { } c
             && (c.ActivePaths.Values.FirstOrDefault(x => x.Path.Id == r.Area) ?? BestPath(c)) is { } p)
         {
-            var techs = Techniques(game).Select(t => (t, x: TechXpHour(p, t))).Where(t => t.x > 0).Select(t => $"{t.t.Technique.DisplayName} {Num(t.x)}");
-            return $"{p.Path.DisplayName}: about {Num(PathXpHour(p))} XP/h at {p.GetTotalSuccessChance():P0} per run; technique XP/h: {string.Join(", ", techs)}";
+            var techs = Techniques(game).Select(t => (t, x: TechXpHour(p, t))).Where(t => t.x > 0).Select(t => $"{t.t.Technique.DisplayName} {Num(t.x)}").ToList();
+            return $"{p.Path.DisplayName}: about {Num(PathXpHour(p))} XP/h at {p.GetTotalSuccessChance():P0} per run"
+                + (techs.Count > 0 ? $"; technique XP/h: {string.Join(", ", techs)}" : "");
         }
         return "";
     }
@@ -244,6 +245,65 @@ static class Finesse
 
     // ---- food ----
 
+    /// <summary>What a food is to thieving and agility: plain food, bonus food for these skills, or bonus food for
+    /// another skill (combat), which heals here like plain food but is kept for its own skill unless you allow it.</summary>
+    public enum FoodKind { Plain, Here, Other }
+
+    public sealed record FoodInfo(Item Item, FoodKind Kind, int Heal, double Price, string Bonus, string Skill)
+    {
+        /// <summary>Gold you give up per HP healed (what it sells for over what it heals).</summary>
+        public double PerHp => Heal > 0 ? Price / Heal : double.MaxValue;
+    }
+
+    static FoodInfo Info(Item item, FoodCapability f)
+    {
+        FoodKind kind = f.Bonuses == null ? FoodKind.Plain
+            : f.Bonuses.Component?.Entity is ThievingEntity or AgilityEntity ? FoodKind.Here : FoodKind.Other;
+        string bonus = "", skill = "";
+        if (f.Bonuses != null)
+        {
+            try
+            {
+                var parts = f.Bonuses.Modifiers.Component.Select(m => m.GetDescription(1.0))
+                    .Concat(f.Bonuses.Modifiers.Global.Select(m => m.GetDescription(1.0)))
+                    .Select(t => System.Text.RegularExpressions.Regex.Replace(t, @"\[[^\]]*\]", "").Trim()).Where(t => t.Length > 0);
+                bonus = string.Join(", ", parts);
+                skill = f.Bonuses.Component?.Entity?.DisplayName.ToString() ?? "";
+                if (skill.Length > 0) bonus = bonus.Length > 0 ? $"{bonus} ({skill})" : skill;
+            }
+            catch { }
+        }
+        double price = item.SellsFor != null ? item.SellsFor.Quantity : 0;
+        return new FoodInfo(item, kind, f.BaseHealing, price, bonus, skill);
+    }
+
+    /// <summary>Every food the game has.</summary>
+    public static List<FoodInfo> AllFoods(Game game)
+    {
+        var list = new List<FoodInfo>();
+        foreach (var (id, _) in Catalog.Items(game))
+            if (Catalog.FindItem(game, id) is { } it && it.Capabilities.TryGet<FoodCapability>(out FoodCapability? f) && f != null)
+                list.Add(Info(it, f));
+        return list;
+    }
+
+    /// <summary>Food in the bank, with how many.</summary>
+    public static List<(FoodInfo Food, int Count)> BankFoods(Game game) =>
+        Foods(game).Select(x => (Info(x.Item, x.Food), Queue.BankCount(game, x.Item.Id))).ToList();
+
+    /// <summary>The food choices from Options: kept out, other skills' bonus food allowed to heal, eating order.</summary>
+    public sealed record FoodRules(ICollection<string> Skip, ICollection<string> Allow, bool BiggestFirst)
+    {
+        public bool Heals(FoodInfo f) => f.Kind switch
+        {
+            FoodKind.Plain => !Skip.Contains(f.Item.Id),
+            FoodKind.Other => Allow.Contains(f.Item.Id),
+            _ => false,   // this skill's bonus food is kept on for its bonus, never eaten to heal
+        };
+        public IEnumerable<FoodInfo> Order(IEnumerable<FoodInfo> foods) =>
+            BiggestFirst ? foods.OrderByDescending(f => f.Heal) : foods.OrderBy(f => f.PerHp).ThenByDescending(f => f.Heal);
+    }
+
     static IEnumerable<(Item Item, FoodCapability Food)> Foods(Game game)
     {
         var any = Catalog.AnyAction(game);
@@ -254,10 +314,10 @@ static class Finesse
     }
 
     /// <summary>The bank's food with a bonus for this skill that scores best (the best sushi for thieving), or null.</summary>
-    public static Item? BuffFood(Game game, IFoodEntity owner, ActionRef r)
+    public static Item? BuffFood(Game game, IFoodEntity owner, ActionRef r, FoodRules? rules = null)
     {
         FoodComponent fc = owner.Food;
-        var buffs = Foods(game).Where(x => x.Food.Bonuses?.Component == fc).ToList();
+        var buffs = Foods(game).Where(x => x.Food.Bonuses?.Component == fc && (rules == null || !rules.Skip.Contains(x.Item.Id))).ToList();
         if (buffs.Count == 0) return null;
         if (buffs.Count == 1) return buffs[0].Item;
         Item? was = fc.SelectedFood?.Item;
@@ -282,9 +342,24 @@ static class Finesse
         return best;
     }
 
-    /// <summary>The bank's biggest heal, preferring food without a bonus for some skill (so sushi isn't eaten as plain food).</summary>
-    static Item? HealFood(Game game) =>
-        Foods(game).OrderBy(x => x.Food.Bonuses != null ? 1 : 0).ThenByDescending(x => x.Food.BaseHealing).Select(x => x.Item).FirstOrDefault();
+    /// <summary>The bank's biggest heal among food without a skill bonus. Sushi and other bonus food never count: eating
+    /// it as plain food is the waste this is here to stop. Null when the bank has no plain food.</summary>
+    static Item? HealFood(Game game, FoodRules? rules)
+    {
+        rules ??= new FoodRules(Array.Empty<string>(), Array.Empty<string>(), false);
+        return rules.Order(Foods(game).Select(x => Info(x.Item, x.Food)).Where(rules.Heals)).Select(f => f.Item).FirstOrDefault();
+    }
+
+    /// <summary>Food Options let it keep selected: this skill's bonus food you haven't kept out, or food it may heal with.</summary>
+    static bool Usable(Item item, FoodRules rules)
+    {
+        if (!item.Capabilities.TryGet<FoodCapability>(out FoodCapability? f) || f == null) return false;
+        FoodInfo info = Info(item, f);
+        return info.Kind == FoodKind.Here ? !rules.Skip.Contains(item.Id) : rules.Heals(info);
+    }
+
+    /// <summary>The bank has none of the food you let it heal with.</summary>
+    public static bool OutOfHealing(Game game, FoodRules? rules) => HealFood(game, rules) == null;
 
     /// <summary>Most HP one failure can take right now.</summary>
     static int MaxHit(Game game, ActionRef r)
@@ -300,7 +375,7 @@ static class Finesse
 
     /// <summary>Keeps the buff food selected; when HP is within one failure of running out (or below the floor you set),
     /// switches to healing food, eats up, and switches back. Returns what it did, or "".</summary>
-    public static string Feed(Game game, ActionRef r, Item? buff, int floorPercent)
+    public static string Feed(Game game, ActionRef r, Item? buff, int floorPercent, FoodRules? rules = null)
     {
         if (!game.Entities.TryGetObjectById(r.Entity, out GameEntity? e) || e is not IFoodEntity owner) return "";
         FoodComponent fc = owner.Food;
@@ -308,29 +383,41 @@ static class Finesse
         if (hp == null) return "";
         int maxHit = MaxHit(game, r);
         // The game auto-eats whatever food is selected (the sushi) at its threshold. Heal first: at the floor you set,
-        // or as soon as one failure could push HP down to that threshold.
+        // or as soon as two failures in a row could push HP down to that threshold (room for a failure landing
+        // between checks, and for damage the game scales up).
         double autoEat = 0.25;
         try { if (fc.Stats != null) autoEat = fc.Stats.AutoEatThreshold.Value; } catch { }
         int autoEatHp = (int)Math.Ceiling(hp.Max * autoEat);
-        int low = Math.Max(autoEatHp + maxHit, hp.Max * floorPercent / 100);
+        int low = Math.Max(autoEatHp + 2 * maxHit, hp.Max * floorPercent / 100);
         string did = "";
         if (hp.Current <= low)
         {
-            Item? heal = HealFood(game);
-            if (heal == null) return buff != null && fc.SelectedFood?.Item == buff ? "" : "no healing food in the bank";
-            fc.SelectFood(heal);
+            Item? heal = HealFood(game, rules);
+            if (heal == null) return buff != null ? $"no healing food in the bank, so the game will eat {buff.DisplayName}" : "no healing food in the bank";
             int ate = 0, before = hp.Current;
-            // Eat up to near full: stop when one more would mostly be wasted.
-            while (ate < 50 && Queue.BankCount(game, heal.Id) > 0 && fc.Stats != null && hp.Max - hp.Current >= fc.Stats.Healing.Value * 0.6)
+            var names = new List<string>();
+            // Eat up to near full, in the order from Options (moving to the next food when one runs out); stop when
+            // one more would mostly be wasted.
+            while (ate < 50 && heal != null)
             {
+                if (fc.SelectedFood?.Item != heal) fc.SelectFood(heal);
+                if (fc.Stats == null || hp.Max - hp.Current < fc.Stats.Healing.Value * 0.6) break;
                 fc.ManualEat();
                 ate++;
+                string n = heal.DisplayName.ToString();
+                if (!names.Contains(n)) names.Add(n);
+                if (Queue.BankCount(game, heal.Id) <= 0) heal = HealFood(game, rules);
             }
-            if (ate > 0) did = $"ate {ate} {heal.DisplayName} ({before} to {hp.Current} HP)";
+            if (ate > 0) did = $"ate {ate} {string.Join(" and ", names)} ({before} to {hp.Current} HP)";
         }
         Item? want = buff != null && Queue.BankCount(game, buff.Id) > 0 ? buff : null;
         if (want != null && fc.SelectedFood?.Item != want) fc.SelectFood(want);
-        else if (want == null && did.Length > 0 && HealFood(game) is { } h && fc.SelectedFood?.Item != h) fc.SelectFood(h);
+        else if (want == null && did.Length > 0 && HealFood(game, rules) is { } h && fc.SelectedFood?.Item != h) fc.SelectFood(h);
+        // Food you told it not to use stays out of the slot, so auto-eat can't spend it either.
+        else if (want == null && rules != null && fc.SelectedFood?.Item is { } sel && !Usable(sel, rules))
+        {
+            if (HealFood(game, rules) is { } h2) fc.SelectFood(h2); else fc.UnselectFood();
+        }
         return did;
     }
 }

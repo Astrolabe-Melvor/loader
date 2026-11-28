@@ -22,6 +22,10 @@ sealed class SlayerPanel
     readonly Button _extend, _reroll, _fight;
     readonly CheckBox _autoExtend, _gameAuto, _rerollLocked, _always;
     readonly SearchPicker _skipPick;
+    /// <summary>For the tour.</summary>
+    public Control Table => _table;
+    public Control Buttons { get; private set; } = null!;
+    public Control Rules { get; private set; } = null!;
     readonly HFlowContainer _skipList;
     string? _master;
     List<SlayerTask> _tasks = new();
@@ -31,10 +35,10 @@ sealed class SlayerPanel
     {
         _q = q;
         _coins = Kit.Label("", null, 14);
-        _reserve = Kit.Spin(new SpinBox { MinValue = 0, MaxValue = 1e12, Prefix = "keep at least", Suffix = "coins", CustomMinimumSize = new Vector2(260, 0) });
+        _reserve = Kit.Spin(new SpinBox { MinValue = 0, MaxValue = 1e12, Suffix = "coins", CustomMinimumSize = new Vector2(200, 0) });
         _reserve.ValueChanged += v => { if (!_filling) _q.SetOption(s => s.SlayerReserve = (long)v); };
-        _reserve.TooltipText = "Rerolls and extensions by your rules never take slayer coins below this. Buttons below ignore it.";
-        box.AddChild(Kit.Row(_coins, Kit.Spacer(), Kit.Label("Rules spend coins but", null, 13, "Dim"), _reserve));
+        _reserve.TooltipText = "Rerolls and extensions by your rules never take slayer coins below this. The Extend and Reroll buttons ignore it.";
+        box.AddChild(Kit.Row(Kit.Label("You have", null, 13, "Dim"), _coins));
 
         _table = new Tree
         {
@@ -53,8 +57,8 @@ sealed class SlayerPanel
         _table.ItemSelected += () => { _master = _table.GetSelected()?.GetMetadata(0).AsString(); Select(); };
         box.AddChild(_table);
 
-        _sel = Kit.Label("Pick a master.", null, 13, "Dim");
-        _sel.CustomMinimumSize = new Vector2(200, 0);
+        _sel = Kit.Label("", null, 14);
+        _sel.CustomMinimumSize = new Vector2(140, 0);
         _extend = Kit.Btn("Extend", () => Do(t => Slayer.Extend(KitGame.Current!, t), "extended"));
         _reroll = Kit.Btn("Reroll", () => Do(t => Slayer.Reroll(KitGame.Current!, t), "rerolled"));
         _fight = Kit.Btn("Fight it now", Fight);
@@ -65,22 +69,36 @@ sealed class SlayerPanel
         _gameAuto = new CheckBox { Text = "Game's Auto Slayer" };
         _gameAuto.TooltipText = "The game's own setting: when you finish this master's task while fighting it, the game moves on to the next one in the same place.";
         _gameAuto.Toggled += on => { if (!_filling && Current() is SlayerTask t) { t.Master.AutoSlayerEnabled = on; Fill(); } };
-        box.AddChild(Kit.Row(_sel, _extend, _reroll, _fight, Kit.Spacer(), _autoExtend, _gameAuto));
+        _autoExtend.SizeFlagsHorizontal = _gameAuto.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
+        box.AddChild(Buttons = Kit.Row(_sel, _extend, _reroll, _fight, Kit.Spacer(), _autoExtend, _gameAuto));
+
+        // The rules a Slayer tasks step follows, together.
+        box.AddChild(Kit.Label("Rules", null, 15, "Heading"));
+        var rules = new VBoxContainer();
+        rules.AddThemeConstantOverride("separation", 8);
+        rules.AddChild(Kit.Row(Kit.Label("Never spend slayer coins below", null, 13), _reserve));
 
         // Monsters to reroll whenever they come up.
         _skipPick = new SearchPicker(280) { Placeholder = "Choose a monster", AutoSelect = false };
         var add = Kit.Btn("Always reroll it", AddSkip);
         add.TooltipText = "Whenever a master gives this monster as a task, reroll it (keeping the coin reserve). Slayer tasks steps never fight it.";
-        box.AddChild(Kit.Row(Kit.Label("Reroll these monsters:", null, 13), _skipPick.Button, add));
+        _skipPick.Button.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
+        rules.AddChild(Kit.Row(Kit.Label("Always reroll", null, 13), _skipPick.Button, add));
         _skipList = new HFlowContainer();
         _skipList.AddThemeConstantOverride("h_separation", 6);
-        box.AddChild(_skipList);
+        rules.AddChild(_skipList);
 
-        _rerollLocked = new CheckBox { Text = "Reroll tasks in areas I can't enter yet" };
+        _rerollLocked = new CheckBox { Text = "Reroll tasks in areas I can't enter yet", SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin };
         _rerollLocked.Toggled += on => { if (!_filling) _q.SetOption(s => s.SlayerRerollLocked = on); };
-        _always = new CheckBox { Text = "Use these rules all the time, not only during a Slayer tasks step" };
+        _always = new CheckBox { Text = "Use these rules all the time, not only during a Slayer tasks step", SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin };
         _always.Toggled += on => { if (!_filling) _q.SetOption(s => s.SlayerAlways = on); };
-        box.AddChild(Kit.Row(_rerollLocked, _always));
+        rules.AddChild(_rerollLocked);
+        rules.AddChild(_always);
+        var indent = new MarginContainer();
+        indent.AddThemeConstantOverride("margin_left", 12);
+        indent.AddChild(rules);
+        box.AddChild(indent);
+        Rules = indent;
 
         _note = Kit.Label("A [i]Slayer tasks[/i] step (Add a step, then Combat, then Slayer tasks) fights the highest master's task you can fight, moves to the next task when one is done, and follows these rules. It does its own switching, so the game's Auto Slayer can stay on or off.", null, 12, "Dim");
         _note.Text = _note.Text.Replace("[i]", "").Replace("[/i]", "");
@@ -124,6 +142,7 @@ sealed class SlayerPanel
             _rerollLocked.SetPressedNoSignal(st.SlayerRerollLocked);
             _always.SetPressedNoSignal(st.SlayerAlways);
 
+            if (_master == null || _tasks.All(t => t.MasterId != _master)) _master = _tasks.FirstOrDefault()?.MasterId;
             _table.Clear();
             TreeItem root = _table.CreateItem();
             foreach (SlayerTask t in _tasks)
@@ -142,7 +161,7 @@ sealed class SlayerPanel
                 if (st.SlayerExtend.Contains(t.MasterId)) rules.Add("extend by rule");
                 if (t.GameAuto) rules.Add("game's Auto Slayer on");
                 r.SetText(5, string.Join(", ", rules));
-                r.SetCustomColor(5, Kit.Link);
+                r.SetCustomColor(5, Kit.Dim);
                 if (t.MasterId == _master) r.Select(0);
             }
             if (_tasks.Count == 0)
@@ -164,7 +183,7 @@ sealed class SlayerPanel
                 if (names.TryGetValue(id, out var a2)) b.Icon = Kit.Icon(a2.Icon, 18);
                 _skipList.AddChild(b);
             }
-            if (st.SlayerSkip.Count == 0) _skipList.AddChild(Kit.Label("none", null, 12, "Dim"));
+            if (st.SlayerSkip.Count == 0) _skipList.AddChild(Kit.Label("No monsters yet. Pick one above to reroll it whenever a master gives it.", null, 12, "Dim"));
             Select();
         }
         finally { _filling = false; }
@@ -184,7 +203,7 @@ sealed class SlayerPanel
         _reroll.Text = on ? $"Reroll ({Slayer.CostText(t!.Reroll)})" : "Reroll";
         _autoExtend.SetPressedNoSignal(on && _q.State.SlayerExtend.Contains(t!.MasterId));
         _gameAuto.SetPressedNoSignal(on && t!.GameAuto);
-        _sel.Text = on ? t!.MasterName : "Pick a master.";
+        _sel.Text = on ? t!.MasterName : "";
         _filling = was;
     }
 

@@ -71,7 +71,30 @@ static class Catalog
             if (comp is AgilityActionComponent ag) actions = AgilityPaths(ag, skill, actions);
             if (actions.Count > 0) result.Add(new SkillChoice(entity.Id, skill, actions, entity.Icon));
         }
-        return result.OrderBy(s => s.Name).ToList();
+        return StandInIcons(result).OrderBy(s => s.Name).ToList();
+    }
+
+    /// <summary>
+    /// Fishing spots, agility courses and dungeons carry the game's stand-in picture for now. A picture that shows up
+    /// in three or more skills is that stand-in, so those actions show their skill's icon instead.
+    /// </summary>
+    static List<SkillChoice> StandInIcons(List<SkillChoice> skills)
+    {
+        static string Key(Godot.Texture2D t) => t.ResourcePath.Length > 0 ? t.ResourcePath : t.GetInstanceId().ToString();
+        var seenIn = new Dictionary<string, HashSet<string>>();
+        foreach (SkillChoice s in skills)
+            foreach (ActionChoice a in s.Actions)
+                if (a.Icon != null)
+                {
+                    if (!seenIn.TryGetValue(Key(a.Icon), out var set)) seenIn[Key(a.Icon)] = set = new();
+                    set.Add(s.Id);
+                }
+        var stand = seenIn.Where(kv => kv.Value.Count >= 3).Select(kv => kv.Key).ToHashSet();
+        if (stand.Count == 0) return skills;
+        return skills.Select(s => s with
+        {
+            Actions = s.Actions.Select(a => a.Icon != null && stand.Contains(Key(a.Icon)) ? a with { Icon = s.Icon } : a).ToList(),
+        }).ToList();
     }
 
     /// <summary>

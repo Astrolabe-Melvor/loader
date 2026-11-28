@@ -20,7 +20,7 @@ To remove, delete `override.cfg` and the folder `data_MelvorModLoader_windows_x8
 
 | Mod | Key | What it does |
 |---|---|---|
-| Course | F6 | Queue actions one after another, each until a goal: a level, an amount, a time. Plans whole items, runs slayer tasks, puts on each step's gear. |
+| Course | F6 | Queue actions one after another, each until a goal: a level, an amount, a time. Plans whole items, runs slayer tasks and thieving food, puts on each step's gear, saves and shares queues. |
 | Logbook | F7 | XP, items and gold this session, per hour, with rare drops and past sessions. |
 | Beacon | F8 | A sound, a note, a taskbar flash or a Discord message when something needs you. |
 | Hold | F9 | What your bank is worth, sell by rules, a cleanup list of what's safe to sell, and shop buying by rules. |

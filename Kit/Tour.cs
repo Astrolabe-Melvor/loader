@@ -14,7 +14,10 @@ sealed record TourStep(string Title, string Text, Func<Control?>? Target = null,
 sealed partial class KitWindow
 {
     readonly Button _tourBtn;
-    TourStep[] _tour = Array.Empty<TourStep>();
+    TourStep[] _tour = Array.Empty<TourStep>();   // the first tour: offered to new users
+    TourStep[] _run = Array.Empty<TourStep>();    // the tour running now
+    (string Name, TourStep[] Steps)[] _tours = Array.Empty<(string, TourStep[])>();
+    PopupMenu? _tourMenu;
     int _step = -1;
     Control? _overlay;
     Panel? _ring;
@@ -30,7 +33,37 @@ sealed partial class KitWindow
     public void SetTour(params TourStep[] steps)
     {
         _tour = steps;
+        _tours = Array.Empty<(string, TourStep[])>();
         _tourBtn.Visible = steps.Length > 0;
+    }
+
+    /// <summary>
+    /// Several tours: the Tour button opens a list of them by name. The first is the one offered to new users
+    /// (and the one <see cref="StartTour()"/> runs); the rest can cover one part of the window each.
+    /// </summary>
+    public void SetTours(params (string Name, TourStep[] Steps)[] tours)
+    {
+        _tours = tours;
+        _tour = tours.Length > 0 ? tours[0].Steps : Array.Empty<TourStep>();
+        _tourBtn.Visible = _tour.Length > 0;
+        if (!_offered) _tourBtn.TooltipText = "Short walks through this window, one part at a time: pick one";
+    }
+
+    /// <summary>The Tour button: the one tour, or a list to pick from when there are several.</summary>
+    void OnTourButton()
+    {
+        if (_tours.Length <= 1 || _offered) { StartTour(); return; }   // a first visit goes straight to the first tour
+        if (_tourMenu == null || !GodotObject.IsInstanceValid(_tourMenu))
+        {
+            _tourMenu = new PopupMenu { Theme = Kit.Theme };
+            _tourMenu.IdPressed += id => { if (id >= 0 && id < _tours.Length) StartTour(_tours[(int)id].Steps); };
+            _tourBtn.AddChild(_tourMenu);
+        }
+        _tourMenu.Clear();
+        for (int i = 0; i < _tours.Length; i++) _tourMenu.AddItem(_tours[i].Name, i);
+        Toured();
+        _tourMenu.Position = (Vector2I)(_tourBtn.GetScreenPosition() + new Vector2(0, _tourBtn.Size.Y * _tourBtn.GetGlobalTransformWithCanvas().Scale.Y));
+        _tourMenu.Popup();
     }
 
     public bool TourRunning => _step >= 0;
@@ -53,13 +86,18 @@ sealed partial class KitWindow
         WindowPrefs.MarkToured(_key);
         _tourBtn.Text = "Tour";
         _tourBtn.ThemeTypeVariation = "";
-        _tourBtn.TooltipText = "A short walk through this window, pointing at each part";
+        _tourBtn.TooltipText = _tours.Length > 1 ? "Short walks through this window, one part at a time: pick one" : "A short walk through this window, pointing at each part";
     }
 
     /// <summary>Starts the tour from the first step (opens the window if it is closed).</summary>
-    public void StartTour()
+    public void StartTour() => StartTour(_tour);
+
+    /// <summary>Starts one of the tours given to <see cref="SetTours"/> (or any list of steps).</summary>
+    public void StartTour(TourStep[] steps)
     {
-        if (_tour.Length == 0) return;
+        if (steps.Length == 0) return;
+        EndTour();
+        _run = steps;
         if (!_layer.Visible) Open();
         Toured();
         if (_helpCard.Visible) ToggleHelp();
@@ -106,7 +144,7 @@ sealed partial class KitWindow
         _cardText.AddThemeFontSizeOverride("bold_font_size", 14);
         col.AddChild(_cardText);
         _back = Kit.Btn("Back", () => Go(_step - 1));
-        _next = Kit.Btn("Next", () => { if (_step + 1 >= _tour.Length) EndTour(); else Go(_step + 1); }, action: true);
+        _next = Kit.Btn("Next", () => { if (_step + 1 >= _run.Length) EndTour(); else Go(_step + 1); }, action: true);
         col.AddChild(Kit.Row(Kit.Btn("End tour", EndTour), Kit.Spacer(), _back, _next));
         _card.AddChild(col);
         _overlay.AddChild(_card);
@@ -117,15 +155,15 @@ sealed partial class KitWindow
 
     void Go(int i)
     {
-        if (i < 0 || i >= _tour.Length) return;
+        if (i < 0 || i >= _run.Length) return;
         _step = i;
-        TourStep s = _tour[i];
+        TourStep s = _run[i];
         try { s.Before?.Invoke(); } catch (Exception e) { KitLog.Write($"Tour step '{s.Title}': {e.Message}"); }
         _cardTitle!.Text = s.Title;
-        _cardCount!.Text = $"{i + 1} of {_tour.Length}";
+        _cardCount!.Text = $"{i + 1} of {_run.Length}";
         _cardText!.Text = s.Text;
         _back!.Disabled = i == 0;
-        _next!.Text = i + 1 >= _tour.Length ? "Done" : "Next";
+        _next!.Text = i + 1 >= _run.Length ? "Done" : "Next";
         _target = null;
         // Look the target up after Before's changes have settled.
         Callable.From(() =>

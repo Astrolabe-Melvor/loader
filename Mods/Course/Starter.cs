@@ -217,6 +217,9 @@ static class Starter
                 if (!rates.TryGetValue(Catalog.Local(a.Ref.Target), out var r)) continue;
                 if (funding != Funding.Bank && Toolbelt.UsesConsumable(game, a.Ref)) continue;
                 double sales = r.Out.Sum(o => o.PerHour * Price(o.Item));
+                // Smithing with the Sacrificial Anvil unlocked: Most GP sacrifices what it makes (its sale value, a
+                // little more on average) instead of making and selling it.
+                if (RewardModes.Unlocked(game, a.Ref) is { } anvil && RewardModes.IsAnvil(anvil)) sales *= RewardModes.Gain(anvil).Gp;
                 double gp;
                 switch (funding)
                 {
@@ -244,16 +247,17 @@ static class Starter
     public static List<ActionRef> BestFor(Game game, string entityId, bool gold) => gold ? GoldFor(game, entityId) : BestFor(game, entityId);
 
     /// <summary>For a step: Most GP, train a technique (Agility), or Fastest XP.</summary>
-    public static List<ActionRef> BestFor(Game game, string entityId, string target, Funding funding = Funding.Bank) =>
+    public static List<ActionRef> BestFor(Game game, string entityId, string target, Funding funding = Funding.Bank, bool rewardMode = false) =>
         target == GoldTarget ? GoldFor(game, entityId, funding)
         : target.StartsWith(Finesse.TechPrefix) ? Finesse.BestForTechnique(game, target[Finesse.TechPrefix.Length..])
-        : BestFor(game, entityId, funding);
+        : BestFor(game, entityId, funding, rewardMode);
 
-    public static List<ActionRef> BestFor(Game game, string entityId, Funding funding = Funding.Bank) =>
-        BestScored(game, entityId, funding).Select(x => x.Ref).ToList();
+    public static List<ActionRef> BestFor(Game game, string entityId, Funding funding = Funding.Bank, bool rewardMode = false) =>
+        BestScored(game, entityId, funding, rewardMode).Select(x => x.Ref).ToList();
 
     /// <summary>Fastest XP's ranking with each action's XP per hour (NaN where the plan has no rate: Thieving, Agility).</summary>
-    public static List<(ActionRef Ref, double Xp)> BestScored(Game game, string entityId, Funding funding = Funding.Bank)
+    /// <param name="rewardMode">The step uses the skill's other mode where unlocked (the Sacrificial Anvil's extra XP counts).</param>
+    public static List<(ActionRef Ref, double Xp)> BestScored(Game game, string entityId, Funding funding = Funding.Bank, bool rewardMode = false)
     {
         // Thieving and Agility: rank by the game's live success chances instead of the plan's base rates (they use
         // nothing from the bank, so every funding choice allows them).
@@ -283,9 +287,14 @@ static class Starter
                 // Only actions the plan knows and that fit the funding choice (no used-up toolbelt items either).
                 open = open.Where(x => xp.TryGetValue(Catalog.Local(x.a.Ref.Target), out double v) && !double.IsNaN(v)
                                        && !Toolbelt.UsesConsumable(game, x.a.Ref)).ToList();
-            double Xp((ActionChoice a, int i) x) => xp.TryGetValue(Catalog.Local(x.a.Ref.Target), out double v) ? v : double.NaN;
-            return open.OrderByDescending(x => double.IsNaN(Xp(x)) ? -1 : Xp(x))
-                       .ThenByDescending(x => x.i).Select(x => (x.a.Ref, Xp(x))).ToList();
+            double Xp((ActionChoice a, int i) x)
+            {
+                if (!xp.TryGetValue(Catalog.Local(x.a.Ref.Target), out double v)) return double.NaN;
+                if (rewardMode && !double.IsNaN(v) && RewardModes.Unlocked(game, x.a.Ref) is { } m) v *= RewardModes.Gain(m).Xp;
+                return v;
+            }
+            return open.Select(x => (x.a, x.i, Xp: Xp(x))).OrderByDescending(x => double.IsNaN(x.Xp) ? -1 : x.Xp)
+                       .ThenByDescending(x => x.i).Select(x => (x.a.Ref, x.Xp)).ToList();
         }
         return funding == Funding.Bank ? open.OrderByDescending(x => x.i).Select(x => (x.a.Ref, double.NaN)).ToList() : new();
     }

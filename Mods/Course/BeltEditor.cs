@@ -18,7 +18,11 @@ sealed class BeltEditor
     readonly OptionButton _skill, _set;
     readonly LineEdit _name;
     readonly GridContainer _grid;
-    readonly Label _note;
+    readonly Label _note, _used;
+    /// <summary>For the tour.</summary>
+    public Control Top { get; private set; } = null!;
+    public Control NameRow { get; private set; } = null!;
+    public Control Grid => _grid;
     readonly Button _save, _delete, _wear;
     BeltSet? _work;          // the set being edited (a copy until saved)
     bool _dirty;
@@ -30,18 +34,19 @@ sealed class BeltEditor
         _skill.ItemSelected += _ => { _work = null; FillSets(null); };
         _set = new OptionButton { CustomMinimumSize = new Vector2(240, 0) };
         _set.ItemSelected += _ => Load(_set.GetItemMetadata(_set.Selected).AsString());
-        box.AddChild(Kit.Row(Field("skill"), _skill, Field("set"), _set,
+        box.AddChild(Top = Kit.Row(Field("skill"), _skill, Field("set"), _set,
             Tip(Kit.Btn("New set", () => New(false)), "Start an empty set for this skill"),
             Tip(Kit.Btn("New set from what's on now", () => New(true)), "Start a set with everything in this skill's toolbelt right now")));
 
         _name = new LineEdit { PlaceholderText = "Name this set", CustomMinimumSize = new Vector2(260, 0) };
         _name.TextChanged += t => { if (_work != null) { _work.Name = t; Dirty(); } };
         _save = Kit.Btn("Save set", Save, action: true);
-        _delete = Kit.Btn("Delete set", Delete);
+        _delete = QueueWindow.Ask("Delete set", "Press again to delete", Delete);
+        _used = Kit.Label("", null, 12, "Dim");
         _wear = Tip(Kit.Btn("Put it on now", Wear), "Equip this set in the skill's toolbelt now, from the bank");
-        box.AddChild(Kit.Row(Field("name"), _name, _save, _delete, Kit.Spacer(), _wear));
+        box.AddChild(NameRow = Kit.Row(Field("name"), _name, _save, _delete, _used, Kit.Spacer(), _wear));
 
-        _grid = new GridContainer { Columns = 4 };
+        _grid = new GridContainer { Columns = 5 };
         _grid.AddThemeConstantOverride("h_separation", 12);
         _grid.AddThemeConstantOverride("v_separation", 4);
         box.AddChild(_grid);
@@ -56,6 +61,19 @@ sealed class BeltEditor
     static T Tip<T>(T c, string tip) where T : Control { c.TooltipText = tip; return c; }
 
     string? SkillId => _skill.Selected < 0 ? null : _skill.GetItemMetadata(_skill.Selected).AsString();
+
+    /// <summary>Opens on one skill (Add a step's "Make a set" and "Edit sets").</summary>
+    public void ShowSkill(string skill)
+    {
+        for (int i = 0; i < _skill.ItemCount; i++)
+            if (_skill.GetItemMetadata(i).AsString() == skill && _skill.Selected != i)
+            {
+                _skill.Select(i);
+                _work = null;
+                FillSets(null);
+                return;
+            }
+    }
 
     /// <summary>Called when the tab is shown.</summary>
     public void Refresh()
@@ -180,6 +198,9 @@ sealed class BeltEditor
         bool on = _work != null && game != null && skill != null;
         _save.Disabled = _delete.Disabled = _wear.Disabled = !on;
         _name.Editable = on;
+        int users = on ? _q.State.Steps.Count(st => st.Belt == _work!.Id) : 0;
+        _used.Text = users == 0 ? "" : $"used by {users} step{(users == 1 ? "" : "s")}";
+        _delete.TooltipText = users == 0 ? "Delete this set" : $"Delete this set; the {users} step{(users == 1 ? "" : "s")} using it will leave the toolbelt as it is";
         if (!on)
         {
             _name.Text = "";
@@ -189,7 +210,7 @@ sealed class BeltEditor
         BeltSet set = _work!;
         if (_name.Text != set.Name) _name.Text = set.Name;
 
-        foreach (string h in new[] { "Slot", "Put in", "In the bank", "When it runs out" })
+        foreach (string h in new[] { "Slot", "Put in", "On now", "In the bank", "Refill when used up" })
             _grid.AddChild(Kit.Label(h, Kit.Parchment, 13, "Heading"));
         foreach (Belts.SlotInfo si in Belts.Slots(game!, skill!))
         {
@@ -220,11 +241,18 @@ sealed class BeltEditor
             };
             _grid.AddChild(pick);
 
-            _grid.AddChild(Kit.Label(chosen == null ? "" : $"{Queue.BankCount(game!, chosen.Id):N0}" + (si.Item == chosen ? $" (+{si.Quantity:N0} on)" : ""), Kit.Dim, 13));
+            // What's there now, so you can see what "Put it on now" changes: green when it already matches.
+            string now = si.Item == null ? "empty" : si.Item.DisplayName.ToString() + (si.Quantity > 1 ? $" ({si.Quantity:N0})" : "");
+            var nowLabel = Kit.Label(chosen == null ? now : si.Item == chosen ? "same" : now, chosen == null ? Kit.Dim : si.Item == chosen ? Kit.Good : Kit.Gold, 13);
+            nowLabel.TooltipText = chosen == null ? "Left as it is." : si.Item == chosen ? "Already on." : $"Putting the set on swaps this for {chosen.DisplayName}.";
+            nowLabel.MouseFilter = Control.MouseFilterEnum.Pass;
+            _grid.AddChild(nowLabel);
+
+            _grid.AddChild(Kit.Label(chosen == null ? "" : $"{Queue.BankCount(game!, chosen.Id):N0}", Kit.Dim, 13));
 
             if (chosen != null && Belts.IsConsumable(chosen))
             {
-                var refill = Kit.Spin(new SpinBox { MinValue = 0, MaxValue = 1_000_000, Value = bs!.Refill, Prefix = "get up to", CustomMinimumSize = new Vector2(170, 0) });
+                var refill = Kit.Spin(new SpinBox { MinValue = 0, MaxValue = 1_000_000, Value = bs!.Refill, Prefix = "up to", CustomMinimumSize = new Vector2(150, 0) });
                 refill.TooltipText = "0 = do nothing. Otherwise, when this runs out during a step: take more from the bank, or make or gather this many (and what they need), then go back to the step.";
                 BeltSlot target = bs;
                 refill.ValueChanged += v => { target.Refill = (int)v; Dirty(); };
@@ -233,8 +261,8 @@ sealed class BeltEditor
             else _grid.AddChild(Kit.Label(chosen == null ? "" : "not used up", Kit.Dim, 12));
         }
         if (!keepNote)
-            _note.Text = "Slots set to \"leave as is\" are not touched. A step that uses this set puts these items on when it starts, "
-                + "from the bank. A consumable with \"get up to\" above 0 is refilled when it runs out: from the bank if there is some, "
-                + "otherwise the queue makes or gathers that many (and whatever they need) first, then goes back to the step and puts them on.";
+            _note.Text = "A step that uses this set puts these on from the bank when it starts; \"leave as is\" slots aren't touched. "
+                + "On now is yellow where putting the set on would change something. A consumable with a refill above 0 is refilled when it runs out: "
+                + "from the bank if there is some, otherwise the queue makes or gathers that many (and what they need) first, then goes back to the step.";
     }
 }

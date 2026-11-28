@@ -102,7 +102,7 @@ sealed partial class KitWindow
         HeaderExtras = new HBoxContainer();
         bar.AddChild(HeaderExtras);
 
-        _tourBtn = Kit.Btn("Tour", () => StartTour());
+        _tourBtn = Kit.Btn("Tour", OnTourButton);
         _tourBtn.Visible = false;
         _tourBtn.TooltipText = "A short walk through this window, pointing at each part";
         bar.AddChild(_tourBtn);
